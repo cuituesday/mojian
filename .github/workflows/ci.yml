@@ -1,0 +1,122 @@
+name: Test and publish image
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOCKER_BUILD_RECORD_UPLOAD: "false"
+
+jobs:
+  test:
+    name: Node.js tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Install canvas libraries and Chinese fonts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3 make g++ pkg-config libcairo2-dev libpango1.0-dev \
+            libjpeg-dev libgif-dev librsvg2-dev fonts-noto-cjk fontconfig
+      - run: npm ci
+      - run: npm test
+
+  publish:
+    name: Build and publish GHCR image
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE_NAME: ghcr.io/cuituesday/mojian
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Image tags and source labels
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          flavor: latest=false
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+      - name: Build image for verification
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: mojian:ci
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=mojian-amd64
+          cache-to: type=gha,scope=mojian-amd64,mode=min
+      - name: Verify container startup and BMP rendering
+        run: |
+          docker run --detach --name mojian-ci \
+            --publish 127.0.0.1:4000:4000 mojian:ci
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:4000/api/health > /dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec mojian-ci node -e '
+            (async () => {
+              const base = "http://127.0.0.1:4000";
+              const response = await fetch(base + "/api/health", { signal: AbortSignal.timeout(5000) });
+              const health = await response.json();
+              if (!response.ok || !health.ok || health.service !== "ink-studio") throw Error("Health check failed");
+              const image = await fetch(base + "/generate-image?istest=1", { signal: AbortSignal.timeout(15000) });
+              const bmp = Buffer.from(await image.arrayBuffer());
+              if (!image.ok || bmp.length < 54 || bmp.toString("ascii", 0, 2) !== "BM" || bmp.readUInt32LE(2) !== bmp.length) throw Error("BMP rendering failed");
+              console.log("Container startup and BMP rendering passed");
+            })().catch(error => { console.error(error); process.exit(1); });
+          '
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs mojian-ci 2>&1 || true
+          docker rm --force mojian-ci || true
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified image
+        id: publish
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Publish summary
+        env:
+          DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          echo "Image: $IMAGE_NAME:latest" >> "$GITHUB_STEP_SUMMARY"
+          echo "Commit: $IMAGE_NAME:sha-$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          echo "Digest: $DIGEST" >> "$GITHUB_STEP_SUMMARY"
