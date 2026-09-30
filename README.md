@@ -52,7 +52,63 @@ npm run start:background
 
 400×300 的 BMP 每张约 352 KiB；10 台设备约 3.4 MiB，大小随输出分辨率变化。浏览器预览、主题缩略图、BMP 导出及 `istest=1` 只在内存中生成，不留服务端图片文件。下载到电脑的 BMP 由浏览器保管，不在服务清理范围内。
 
-## Docker 部署
+## 开发分支与自动构建
+
+日常开发使用 `develop` 分支，本地仍通过 `npm start` 或 `npm run start:background` 运行 Node.js 服务，访问 `http://localhost:4000`。本地数据仍保存在 `data/`，无需 Docker，也不拉取 CI 发布的镜像。
+
+`.github/workflows/ci.yml` 定义以下流程：
+
+| 触发方式 | 执行内容 |
+| --- | --- |
+| 推送 `develop` | 安装依赖、运行 `npm test`，不构建或发布镜像 |
+| 向 `main` 提交 Pull Request | 运行测试，不发布镜像 |
+| 合并后推送 `main`（或直接推送 `main`） | 测试通过后构建镜像，验证容器启动和 BMP 渲染，再上传 GHCR |
+| Actions 手动运行 | `main` 执行完整发布，其他分支只运行测试 |
+
+镜像用于未来服务器部署，当前目标架构是常见 Linux x86_64 服务器的 `linux/amd64`：
+
+- `ghcr.io/cuituesday/mojian:latest`：最近一次成功发布的 main 镜像。
+- `ghcr.io/cuituesday/mojian:sha-<完整提交号>`：对应代码提交的镜像标签，供服务器固定版本或回滚使用。需要不可变引用时使用构建摘要中的 digest。
+
+工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需额外配置 Docker Hub 或 GitHub PAT。仓库需要启用 GitHub Actions，并允许工作流中的 GitHub/Docker Actions。构建状态在仓库的 Actions 页面查看；失败时不会执行后续发布步骤。此流程不部署服务器，也不更新本地正在运行的服务。
+
+GHCR 首次创建的镜像包通常默认为私有。未来服务器匿名拉取前，可由仓库所有者到 GitHub 的 Packages → mojian → Package settings 设置为 Public；保持私有则使用有 `read:packages` 权限的凭据登录 GHCR 后拉取。若包已存在且提示无推送权限，检查包的 Manage Actions access 是否授权本仓库。本配置不自动修改包可见性。
+
+日常开发与发布命令（先保存当前编辑，确保工作区干净）：
+
+```sh
+git switch develop
+git pull --ff-only origin develop
+# 编辑代码、本地运行并验证
+npm test
+git add <本次修改的文件>
+git commit -m "feat: 描述本次功能"
+git push origin develop
+
+# 功能完成后合并并发布；也可以在 GitHub 创建 develop → main 的 PR
+git switch main
+git pull --ff-only origin main
+git merge --no-ff develop -m "Merge develop into main"
+git push origin main
+
+# 回到开发分支，同步发布后的 main
+git switch develop
+git merge --ff-only main
+git push origin develop
+```
+
+以上流程是分支协作约定，未启用强制分支保护；如需强制 PR 审核或禁止直接推送 main，可另设 GitHub 分支规则。
+
+## Docker 部署（未来服务器使用）
+
+服务器可复用本仓库的 `compose.yaml` 和 `config.json`。使用 CI 镜像时，从 Compose 中移除 `build: .`，将 `image: ink-studio:local` 改为 `image: ghcr.io/cuituesday/mojian:latest`，保留端口、持久化数据卷和配置挂载。然后在服务器运行：
+
+```sh
+docker compose pull ink-studio
+docker compose up -d --no-build ink-studio
+```
+
+需要固定版本时把 `latest` 改成相应的 `sha-<完整提交号>`。更新时继续使用同一 Compose 项目名和数据卷。下面保留从源码构建镜像的备用部署方式，当前本地开发仍使用上面的 Node.js 启动方式。
 
 镜像使用 Node.js 24，包含 canvas 运行库和中文字体，以非 root 用户运行。推荐在项目目录使用 Compose：
 
