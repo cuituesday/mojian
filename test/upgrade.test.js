@@ -50,7 +50,7 @@ test('source cache deduplicates, survives restart, marks stale responses and iso
   clock+=601000;fail=true;const stale=await restored.feed('trending',defaultSettings);assert.equal(stale.stale,true);assert.equal(stale.items.length,20);assert.match(stale.status,/旧缓存/);assert.equal(stale.error,'offline');
   await restored.feed('trending',defaultSettings);assert.equal(calls,2);
   fail=false;const weatherSettings={...defaultSettings,weatherLive:true};
-  const weather=await sources.weather(weatherSettings);assert.equal(weather.tomorrowCondition,'雨');assert.equal(weather.temperature,22);
+  const weather=await sources.weather(weatherSettings);assert.equal(weather.tomorrowCondition,'小雨');assert.equal(weather.temperature,22);
   const current=calls;await sources.weather({...weatherSettings,latitude:30});assert.equal(calls,current+1);
   const cities=await sources.cities('杭州');assert.equal(cities[0].longitude,120.15);
   assert.throws(()=>normalizeFeed('weibo',{data:{}}));

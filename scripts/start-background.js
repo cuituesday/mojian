@@ -12,7 +12,7 @@ async function health() {
   try {
     const response = await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1500), redirect: 'error' });
     const data = await response.json().catch(() => null);
-    if (!response.ok || data?.service !== 'ink-studio' || !data.ok) throw Error(`端口 ${port} 被其他服务占用，请检查后重试。`);
+    if (!response.ok || data?.service !== 'mojian' || !data.ok) throw Error(`端口 ${port} 被其他服务占用，请检查后重试。`);
     return data;
   } catch (error) {
     if (error.cause?.code === 'ECONNREFUSED') return null;

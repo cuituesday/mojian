@@ -1,4 +1,4 @@
-# 墨间 · Ink Studio
+# 墨间 · mojian
 
 ## 启动
 
@@ -105,13 +105,13 @@ git push origin develop
 将本仓库的 `compose.yaml` 和 `config.json` 放到服务器同一个部署目录中。Compose 已使用 `ghcr.io/cuituesday/mojian:latest`，直接拉取已发布镜像，不在服务器编译源码。镜像使用 Node.js 24，包含 canvas 运行库和中文字体，以非 root 用户运行。在部署目录执行：
 
 ```sh
-docker compose pull ink-studio
-docker compose up -d --no-build ink-studio
+docker compose pull mojian
+docker compose up -d --no-build mojian
 docker compose ps
 docker compose logs -f --tail=100
 ```
 
-需要固定版本时把 `latest` 改成相应的 `sha-<完整提交号>`。更新时继续使用同一 Compose 项目名和数据卷。本地开发仍使用 Node.js 启动方式。
+需要固定版本时把 `latest` 改成相应的 `sha-<完整提交号>`。更新时继续使用同一 Compose 项目名和数据卷。本地开发仍使用 Node.js 启动方式。Compose 服务名统一为 `mojian`，数据卷名保留 `ink-data` 以兼容现有数据；从旧版升级时先在原 Compose 文件目录执行 `docker compose down`（不带 `-v`），再替换文件并启动，避免旧容器继续占用端口。
 
 打开 `http://服务器IP:4000`；设备使用 `http://服务器IP:4000/generate-image`。容器内页面可能列出内部网卡地址，请使用宿主机局域网 IP 和已发布端口，不要填写容器内部 IP。本地 Node 服务已占用 4000 时，先停止它，或把 Compose 端口映射改为 `4001:4000` 并通过宿主机 4001 端口访问。
 
@@ -123,7 +123,7 @@ docker compose logs -f --tail=100
 
 ```sh
 docker pull ghcr.io/cuituesday/mojian:latest
-docker run -d --name ink-studio --init --restart unless-stopped \
+docker run -d --name mojian --init --restart unless-stopped \
   --stop-timeout 15 -p 4000:4000 \
   -v ink-data:/app/data \
   --mount "type=bind,src=$(pwd)/config.json,dst=/app/config.json,readonly" \
@@ -137,7 +137,10 @@ docker run -d --name ink-studio --init --restart unless-stopped \
 
 - 9多个只读内置主题：极简日历、日历气象台、农历月历、天气、时钟、微博热搜、每日新闻、山野背景天气、备忘录。
 - 布局参考 400×300 墨水屏：大字日期、农历、周末标红、今明天气、日程和倒计时；电池电量仅使用设备实际上报值，无值显示 --，不模拟 Wi-Fi 信号。
-- 复制模板或从空白创建主题。可添加文字、图片、色块、日历、农历月历、天气图标和动态列表，拖动、修改属性、调整层级，保存、预览及下载 BMP。文字支持对齐及单行自动缩小字号。已保存的旧主题副本不会被内置主题更新覆盖。
+- 复制模板或从空白创建主题。可添加文字、图片、色块、日历、农历月历、天气图标和动态列表，拖动、修改属性、调整层级，保存、预览及下载 BMP。所有元素支持八个边框控制点拖拽缩放，按住 Shift 保持比例。已保存的旧主题副本不会被内置主题更新覆盖。
+- 右侧文字编辑区与画布元素使用相同显示比例、字号和换行规则；字号通过常用值下拉选择。选中文字后，加粗、斜体、下划线和删除线仅作用于选区，可在同一元素内混合使用；没有选区时这些按钮禁用。支持 Ctrl / Command + B、I、U 和撤销、重做，回车直接换行，输入超出高度时自动加高元素。字号、对齐和行高作用于当前文字元素，另有适应文字高度和单行自动缩小字号。动态变量在输入区显示原文，在画布中显示替换结果，替换内容继承变量起始位置的格式。
+- 图片选择后先进入可视裁剪窗口，拖动选择内容，使用滚轮、滑块或加减按钮缩放，可切换裁剪比例。服务端保存原图和裁剪范围，选中图片后可「重新裁剪」或「更换图片」，取消不会改变原内容。
+- 气象组件使用原有的黑白红线条插画图标，根据天气显示太阳、云朵、雨滴或雪花；未知天气显示问号。图标在服务端绘制，无需联网下载。
 - 全局默认主题与单设备主题分配。首次携带 x-devid 的请求自动登记设备。
 - 请求记录包含时间、来源 IP、路径、请求头和实际返回头；默认保留 30 天且最多 200 条，页面展示最近 100 条。常见认证字段会脱敏，但日志仍属于本地设备数据。
 - 24 位 BMP，正确包含四字节行对齐，支持宽高调整、黑白红量化、Floyd–Steinberg 与 Atkinson 抖动、180° 旋转。
@@ -187,3 +190,5 @@ curl -D - -o /tmp/ink-device.bmp \
 这会登记一台测试设备。真实测试时直接让硬件请求同一接口，然后在「请求记录 → 详情」检查完整数据。错误路径也会保留诊断记录；HTTP 服务实际接收到的请求才会出现。
 
 运行 `npm test` 可验证 BMP、渲染、设备协议、静默、持久化与输入边界。测试使用独立临时数据目录，不混入真实设备数据。
+
+文字编辑与服务端渲染共用随项目附带的 Noto Sans SC 常规和粗体字体，来自 [Noto CJK](https://github.com/notofonts/noto-cjk)，按 SIL Open Font License 1.1 提供，许可证见 `public/fonts/LICENSE`。

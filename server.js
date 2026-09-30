@@ -31,6 +31,24 @@ function validateTheme(input) {
       Object.assign(result, { text: el.text, size: el.size, bold: Boolean(el.bold), lineHeight: number(el.lineHeight || 1.3, 1, 3, '行高') });
       if(el.align && !['left','center','right'].includes(el.align))fail('文字对齐方式无效');
       result.align=el.align||'left'; result.fit=Boolean(el.fit);
+      for (const key of ['italic','underline','strike']) {
+        if (el[key] !== undefined && typeof el[key] !== 'boolean') fail(`${key} 必须为开关值`);
+        result[key] = Boolean(el[key]);
+      }
+      if(el.styles !== undefined) {
+        if(!Array.isArray(el.styles) || el.styles.length>5000) fail('文字格式范围无效');
+        let previous=0;
+        result.styles=el.styles.map(span=>{
+          if(!span || !Number.isInteger(span.start) || !Number.isInteger(span.end) || span.start<previous || span.end<=span.start || span.end>el.text.length) fail('文字格式范围无效');
+          previous=span.end;
+          const style={start:span.start,end:span.end};
+          for(const key of ['bold','italic','underline','strike']) {
+            if(typeof span[key]!=='boolean') fail('文字格式必须为开关值');
+            style[key]=span[key];
+          }
+          return style;
+        });
+      }
     }
     if(el.type==='feed') {
       if(!['trending','news'].includes(el.source))fail('列表来源无效');
@@ -39,6 +57,14 @@ function validateTheme(input) {
     if (el.type === 'image') {
       if (typeof el.src !== 'string' || el.src.length > 3e6 || !/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(el.src)) fail('图片仅支持小于 2 MB 的 PNG / JPEG / WebP');
       result.src = el.src;
+      if (el.crop !== undefined) {
+        if (!el.crop || typeof el.crop !== 'object') fail('裁剪范围无效');
+        const { x, y, width, height } = el.crop;
+        number(x,0,1,'裁剪 X'); number(y,0,1,'裁剪 Y');
+        number(width,0.000001,1,'裁剪宽度'); number(height,0.000001,1,'裁剪高度');
+        if (x+width > 1.000001 || y+height > 1.000001) fail('裁剪范围超出原图');
+        result.crop = { x,y,width,height };
+      }
     }
     return result;
   });
@@ -117,7 +143,7 @@ function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchI
     const addresses = Object.values(os.networkInterfaces()).flat().filter(x => x && x.family === 'IPv4' && !x.internal).map(x => `http://${x.address}:${port}/generate-image`);
     return { local: `http://localhost:${port}`, addresses };
   }
-  app.get('/api/health', (req, res) => res.json({ service: 'ink-studio', ok: true, pid: process.pid }));
+  app.get('/api/health', (req, res) => res.json({ service: 'mojian', ok: true, pid: process.pid }));
   app.get('/api/state', (req, res) => res.json({ ...state, requests: state.requests.slice(0, 100), themes: allThemes(), ...urls(), quietNow: isQuiet(state.settings), sourceStatus:sources.status() }));
   app.get('/api/cities', async(req,res)=>{
     const q=String(req.query.q||'').trim();if(q.length<2||q.length>80)fail('请输入 2–80 字的城市名称');
@@ -155,6 +181,12 @@ function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchI
     const settings = req.body.settings ? validateSettings(req.body.settings, state.settings) : state.settings;
     const frame = await makeFrame(theme, settings,{pageIndex:pageIndex(req.body.page)});
     res.set('X-Ink-Page-Count',String(Math.max(1,...Object.values(frame.feedPages).map(p=>p.total)))).type('png').send(frame.png);
+  });
+  app.post('/api/text-layout', (req,res) => {
+    const theme=validateTheme({name:'文字排版',width:100,height:100,background:'#ffffff',elements:[req.body.element]});
+    const el=theme.elements[0];if(el.type!=='text')fail('请选择文字元素');
+    const ctx=require('canvas').createCanvas(1,1).getContext('2d');
+    res.json(require('./public/text-layout').layout(ctx,el));
   });
   app.post('/api/export', async (req, res) => {
     const theme = validateTheme(req.body.theme);

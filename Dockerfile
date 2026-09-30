@@ -23,5 +23,5 @@ COPY public ./public
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD node -e 'fetch("http://127.0.0.1:"+process.env.PORT+"/api/health",{signal:AbortSignal.timeout(4000)}).then(async r=>{const d=await r.json();if(!r.ok||!d.ok||d.service!=="ink-studio")process.exit(1)}).catch(()=>process.exit(1))'
+  CMD node -e 'fetch("http://127.0.0.1:"+process.env.PORT+"/api/health",{signal:AbortSignal.timeout(4000)}).then(async r=>{const d=await r.json();if(!r.ok||!d.ok||d.service!=="mojian")process.exit(1)}).catch(()=>process.exit(1))'
 CMD ["node", "server.js"]
