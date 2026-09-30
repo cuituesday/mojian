@@ -62,13 +62,14 @@ npm run start:background
 | --- | --- |
 | 推送 `develop` | 安装依赖、运行 `npm test`，不构建或发布镜像 |
 | 向 `main` 提交 Pull Request | 运行测试，不发布镜像 |
-| 合并后推送 `main`（或直接推送 `main`） | 测试通过后构建镜像，验证容器启动和 BMP 渲染，再上传 GHCR |
-| Actions 手动运行 | `main` 执行完整发布，其他分支只运行测试 |
+| 合并后推送 `main`（或直接推送 `main`） | 测试通过后，一次构建并上传 GHCR |
+
+测试包含 BMP 渲染与设备接口验证；CI 不再额外启动容器执行冒烟检查。保留 Docker 构建层缓存以加快后续构建。
 
 镜像用于未来服务器部署，当前目标架构是常见 Linux x86_64 服务器的 `linux/amd64`：
 
 - `ghcr.io/cuituesday/mojian:latest`：最近一次成功发布的 main 镜像。
-- `ghcr.io/cuituesday/mojian:sha-<完整提交号>`：对应代码提交的镜像标签，供服务器固定版本或回滚使用。需要不可变引用时使用构建摘要中的 digest。
+- `ghcr.io/cuituesday/mojian:sha-<完整提交号>`：对应代码提交的镜像标签，供服务器固定版本或回滚使用。需要不可变引用时使用镜像 digest。
 
 工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需额外配置 Docker Hub 或 GitHub PAT。仓库需要启用 GitHub Actions，并允许工作流中的 GitHub/Docker Actions。构建状态在仓库的 Actions 页面查看；失败时不会执行后续发布步骤。此流程不部署服务器，也不更新本地正在运行的服务。
 
@@ -101,22 +102,16 @@ git push origin develop
 
 ## Docker 部署（未来服务器使用）
 
-服务器可复用本仓库的 `compose.yaml` 和 `config.json`。使用 CI 镜像时，从 Compose 中移除 `build: .`，将 `image: ink-studio:local` 改为 `image: ghcr.io/cuituesday/mojian:latest`，保留端口、持久化数据卷和配置挂载。然后在服务器运行：
+将本仓库的 `compose.yaml` 和 `config.json` 放到服务器同一个部署目录中。Compose 已使用 `ghcr.io/cuituesday/mojian:latest`，直接拉取已发布镜像，不在服务器编译源码。镜像使用 Node.js 24，包含 canvas 运行库和中文字体，以非 root 用户运行。在部署目录执行：
 
 ```sh
 docker compose pull ink-studio
 docker compose up -d --no-build ink-studio
-```
-
-需要固定版本时把 `latest` 改成相应的 `sha-<完整提交号>`。更新时继续使用同一 Compose 项目名和数据卷。下面保留从源码构建镜像的备用部署方式，当前本地开发仍使用上面的 Node.js 启动方式。
-
-镜像使用 Node.js 24，包含 canvas 运行库和中文字体，以非 root 用户运行。推荐在项目目录使用 Compose：
-
-```sh
-docker compose up -d --build
 docker compose ps
 docker compose logs -f --tail=100
 ```
+
+需要固定版本时把 `latest` 改成相应的 `sha-<完整提交号>`。更新时继续使用同一 Compose 项目名和数据卷。本地开发仍使用 Node.js 启动方式。
 
 打开 `http://服务器IP:4000`；设备使用 `http://服务器IP:4000/generate-image`。容器内页面可能列出内部网卡地址，请使用宿主机局域网 IP 和已发布端口，不要填写容器内部 IP。本地 Node 服务已占用 4000 时，先停止它，或把 Compose 端口映射改为 `4001:4000` 并通过宿主机 4001 端口访问。
 
@@ -124,16 +119,16 @@ docker compose logs -f --tail=100
 
 如果需要继续使用现有本地 `data/`，将 Compose 中 `ink-data:/app/data` 改成 `./data:/app/data`。先停止原服务并备份，确保该目录对容器用户 UID/GID `1000:1000` 可读写（尤其是 Linux 宿主机）；同一目录只运行一个服务实例。
 
-也可仅使用 Dockerfile：
+也可直接使用 Docker 命令拉取并启动镜像：
 
 ```sh
-docker build -t ink-studio:local .
+docker pull ghcr.io/cuituesday/mojian:latest
 docker run -d --name ink-studio --init --restart unless-stopped \
   --stop-timeout 15 -p 4000:4000 \
   -v ink-data:/app/data \
   --mount "type=bind,src=$(pwd)/config.json,dst=/app/config.json,readonly" \
   --log-opt max-size=10m --log-opt max-file=3 \
-  ink-studio:local
+  ghcr.io/cuituesday/mojian:latest
 ```
 
 容器以前台进程运行服务，支持健康检查和正常退出，不使用后台启动脚本。应用文件日志按 `logRetentionDays` 清理；Docker 标准输出日志单独按 10 MB × 3 个文件轮转，防止宿主机日志长期增长。天气和热榜功能需要容器能够访问对应公网接口。
