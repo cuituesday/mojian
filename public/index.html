@@ -1,9 +1,9 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>墨间 · Ink Studio</title><link rel="stylesheet" href="/style.css"></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>墨间 · mojian</title><link rel="stylesheet" href="/style.css"></head>
 <body>
   <aside class="sidebar">
-    <a class="brand" href="/">墨<span>间</span><small>INK STUDIO</small></a>
+    <a class="brand" href="/">墨<span>间</span><small>mojian</small></a>
     <div class="workspace-label">我的工作空间</div>
     <nav><button data-view="themes" class="nav active"><span>▦</span> 主题画廊</button><button data-view="editor" class="nav"><span>✎</span> 画布编辑器</button><button data-view="devices" class="nav"><span>▣</span> 我的设备 <i id="device-count">0</i></button><button data-view="requests" class="nav"><span>≋</span> 请求记录</button></nav>
     <div class="sidebar-bottom"><button data-view="settings" class="nav"><span>⚙</span> 设置</button><div class="local-status"><b></b> 本地服务运行中<small>你的画面，留在你的空间。</small></div></div>
@@ -12,5 +12,15 @@
   <div id="toast" role="status" aria-live="polite"></div>
   <dialog id="detail"><div class="dialog-head"><h3>请求详情</h3><button id="close-detail" class="icon-btn" aria-label="关闭">×</button></div><pre id="detail-body"></pre></dialog>
   <input type="file" id="image-file" accept="image/png,image/jpeg,image/webp" hidden>
+  <dialog id="image-crop" aria-labelledby="crop-title">
+    <div class="dialog-head"><h3 id="crop-title">裁剪图片</h3><button id="crop-cancel" aria-label="取消裁剪">取消</button></div>
+    <p class="subtext">拖动图片选择内容，滚轮或滑块放大缩小；白框内为最终显示范围。</p>
+    <canvas width="600" height="380" aria-label="图片裁剪预览"></canvas>
+    <div class="crop-controls"><label>比例 <select id="crop-ratio"></select></label><button id="crop-zoom-out" aria-label="缩小图片">−</button><input id="crop-zoom" aria-label="图片缩放" type="range" min="1" max="10" step="0.01"><button id="crop-zoom-in" aria-label="放大图片">＋</button><span id="crop-zoom-label"></span></div>
+    <div class="dialog-actions"><button id="crop-reset">重置位置</button><button id="crop-apply" class="primary">应用裁剪</button></div>
+  </dialog>
+  <script src="/text-layout.js"></script>
+  <script src="/geometry.js"></script>
+  <script src="/editor-tools.js"></script>
   <script src="/app.js"></script>
 </body></html>

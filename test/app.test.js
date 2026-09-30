@@ -56,7 +56,7 @@ test('uploaded image composition and 180-degree rotation preserve expected pixel
   assert.deepEqual(pixel(flipped,5,5),[255,255,255]); assert.deepEqual(pixel(flipped,95,95),[0,0,255]);
 });
 test('API persists configuration, isolates previews, records device protocol, freezes frames and validates edits', async t => {
-  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ink-studio-test-'));
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mojian-test-'));
   const app = createApp({ dataDir }), server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
   t.after(async () => { await new Promise(resolve => server.close(resolve)); fs.rmSync(dataDir, { recursive: true, force: true }); });
