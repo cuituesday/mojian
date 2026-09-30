@@ -1,0 +1,9 @@
+{
+  "name": "ink-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "本地墨水屏主题与设备管理",
+  "scripts": { "start": "node server.js", "start:background": "node scripts/start-background.js", "test": "node --test test/*.test.js" },
+  "engines": { "node": ">=20" },
+  "dependencies": { "canvas": "3.2.3", "express": "5.2.1" }
+}

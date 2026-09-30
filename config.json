@@ -1,0 +1,6 @@
+{
+  "logRetentionDays": 30,
+  "frameRetentionDays": 30,
+  "tempRetentionHours": 24,
+  "cleanupIntervalMinutes": 60
+}

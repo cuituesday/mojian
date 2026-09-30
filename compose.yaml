@@ -1,0 +1,20 @@
+services:
+  ink-studio:
+    build: .
+    image: ink-studio:local
+    init: true
+    restart: unless-stopped
+    ports:
+      - "4000:4000"
+    volumes:
+      - ink-data:/app/data
+      - ./config.json:/app/config.json:ro
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ink-data:
