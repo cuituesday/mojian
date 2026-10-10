@@ -5,6 +5,7 @@ const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;'
 let state, view = 'themes', draft = null, selected = null, dirty = false, previewURL, previewTimer, previewVersion = 0;
 let editorPage=0,editorPageCount=1,cityResults=[];
 let textEditor=null, replaceImageId=null;
+let draftBaseline=null;
 const elementLabels={text:'文字',rect:'色块',image:'图片',calendar:'日历',landscape:'山野背景','month-grid':'农历月历','weather-icon':'天气图标',feed:'动态列表'};
 const titles = { themes: '主题画廊', editor: '画布编辑器', devices: '我的设备', requests: '请求记录', settings: '设置' };
 const time = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '—';
@@ -16,9 +17,24 @@ async function api(url, method = 'GET', body) {
 }
 async function refresh() { state = await api('/api/state'); $('#device-count').textContent = state.devices.length; }
 function head(title, subtitle, actions = '') { return `<div class="heading"><div><div class="eyebrow">YOUR PERSONAL INK SPACE</div><h1>${title}</h1><p class="subtext">${subtitle}</p></div>${actions}</div>`; }
-function navigate(next) {
+function confirmAction(title,message,accept='放弃更改并返回',cancel='继续编辑') {
+  const dialog=$('#confirm-action');if(dialog.open)return Promise.resolve(false);
+  $('#confirm-title').textContent=title;$('#confirm-message').textContent=message;
+  $('#confirm-accept').textContent=accept;$('#confirm-cancel').textContent=cancel;
+  return new Promise(resolve=>{
+    const controller=new AbortController(),options={signal:controller.signal};let accepted=false;
+    $('#confirm-cancel').addEventListener('click',()=>dialog.close(),options);
+    $('#confirm-accept').addEventListener('click',()=>{accepted=true;dialog.close();},options);
+    dialog.addEventListener('close',()=>{controller.abort();resolve(accepted);},{once:true});
+    dialog.showModal();$('#confirm-cancel').focus();
+  });
+}
+async function navigate(next) {
   if (dirty && next === view) return;
-  if (dirty && next !== view && !confirm('有尚未保存的更改，确定离开？')) return;
+  if (dirty && next !== view && !await confirmAction('有未保存的更改',next==='themes'&&view==='editor'?'返回后，本次尚未保存的更改将被放弃。':'离开后，本次尚未保存的更改将被放弃。',next==='themes'&&view==='editor'?'放弃更改并返回':'放弃更改并离开')) return;
+  if (view === 'editor' && next !== view) {
+    draft=null;selected=null;draftBaseline=null;clearTimeout(previewTimer);previewVersion++;
+  }
   dirty = false; view = next;
   textEditor?.destroy(); textEditor=null;
   document.querySelectorAll('[data-view]').forEach(b => b.classList.toggle('active', b.dataset.view === view));
@@ -33,19 +49,27 @@ function renderThemes() {
     `<div class="section-head"><h2>我的主题 <small> / 自由编辑</small></h2><small>${state.customThemes.length} 个自定义主题</small></div><div class="theme-grid">${state.themes.filter(t => !t.builtin).map(themeCard).join('')}<button class="blank-card" data-action="blank"><span class="plus">＋</span><h3>从一张白纸开始</h3><p>文字、图片、日历，自由组合</p></button></div>`;
 }
 function themeCard(t) {
-  return `<article class="theme-card"><div class="theme-preview"><span class="badge ${t.id === state.activeTheme ? 'active' : ''}">${t.id === state.activeTheme ? '默认画面' : t.builtin ? '内置主题' : '自定义'}</span><img loading="lazy" src="/api/themes/${encodeURIComponent(t.id)}/preview?v=${Date.now()}" alt="${esc(t.name)}预览"></div><div class="card-content"><div class="card-title"><h3>${esc(t.name)}</h3><small>${t.width} × ${t.height}</small></div><p>${esc(t.description)}</p><div class="card-actions"><button class="small soft" data-action="activate" data-id="${t.id}">设为默认</button><button class="small" data-action="${t.builtin ? 'copy' : 'edit'}" data-id="${t.id}">${t.builtin ? '复制并编辑' : '编辑主题'} ↗</button></div></div></article>`;
+  const menu = t.builtin ? '' : `<details class="theme-menu"><summary aria-label="${esc(t.name)} 更多操作">···</summary><div class="theme-menu-items"><button type="button" data-action="copy-custom" data-id="${t.id}">复制</button><button type="button" class="danger" data-action="delete-theme" data-id="${t.id}">删除</button></div></details>`;
+  return `<article class="theme-card"><div class="theme-preview"><span class="badge ${t.id === state.activeTheme ? 'active' : ''}">${t.id === state.activeTheme ? '默认画面' : t.builtin ? '内置主题' : '自定义'}</span>${menu}<img loading="lazy" src="/api/themes/${encodeURIComponent(t.id)}/preview?v=${Date.now()}" alt="${esc(t.name)}预览"></div><div class="card-content"><div class="card-title"><h3>${esc(t.name)}</h3><small>${t.width} × ${t.height}</small></div><p>${esc(t.description)}</p><div class="card-actions"><button class="small soft" data-action="activate" data-id="${t.id}">设为默认</button><button class="small" data-action="${t.builtin ? 'copy' : 'edit'}" data-id="${t.id}">${t.builtin ? '复制并编辑' : '编辑主题'} ↗</button></div></div></article>`;
 }
 function blank() { return { name: '未命名主题', description: '我的自定义画面', width: state.settings.width, height: state.settings.height, background: '#ffffff', elements: [] }; }
+function copyName(name) {
+  let index=1,candidate;
+  do { const suffix=index===1?' · 副本':` · 副本 ${index}`;candidate=name.slice(0,60-suffix.length)+suffix;index++; }
+  while(state.themes.some(t=>t.name===candidate));
+  return candidate;
+}
 function renderEditor() {
   textEditor?.destroy(); textEditor=null;
-  if (!draft) draft = blank();
+  if (!draft) { draft = blank();draftBaseline=JSON.stringify(draft); }
   const el = draft.elements.find(e => e.id === selected);
-  $('#content').innerHTML = head('一张画布，无限可能。', '拖动元素移动，拖动边框控制点缩放；按住 Shift 保持比例。', '<div class="row"><button data-action="save">保存主题</button><button class="primary" data-action="save-activate">保存并设为默认</button></div>') +
-    `<div class="section-head"><div class="editor-top"><input id="theme-name" aria-label="主题名称" value="${esc(draft.name)}"><span class="tag">${draft.width} × ${draft.height}</span><span class="hint" id="save-status">${dirty ? '有未保存更改' : '编辑你的画面'}</span></div><button class="small" data-action="download">下载 BMP ↧</button></div>` +
+  $('#content').innerHTML = head('一张画布，无限可能。', '拖动元素移动，拖动边框控制点缩放；按住 Shift 保持比例。', '<div class="row"><button data-action="back-themes">返回主题</button><button data-action="save">保存主题</button><button class="primary" data-action="save-activate">保存并设为默认</button></div>') +
+    `<div class="section-head"><div class="editor-top"><label class="theme-meta-field">主题名称<input id="theme-name" maxlength="60" aria-label="主题名称" value="${esc(draft.name)}"></label><label class="theme-meta-field">主题描述<input id="theme-description" maxlength="100" aria-label="主题描述" placeholder="简单介绍这个主题（选填）" value="${esc(draft.description)}"></label><span class="tag">${draft.width} × ${draft.height}</span><span class="hint" id="save-status">${dirty ? '有未保存更改' : '编辑你的画面'}</span></div><button class="small" data-action="download">下载 BMP ↧</button></div>` +
     `<div class="editor-layout"><section class="panel editor-panel"><h3>添加元素</h3><div class="tool-buttons"><button data-action="add-text">T 文字</button><button data-action="add-image">▧ 图片</button><button data-action="add-rect">□ 色块</button><button data-action="add-calendar">▦ 日历</button><button data-action="add-weather-icon">☁ 气象</button><button data-action="add-month-grid">▦ 农历</button><button data-action="add-trending-feed">热搜列表</button><button data-action="add-news-feed">新闻列表</button></div><div class="layer-list">${draft.elements.map(e => `<button class="layer ${e.id === selected ? 'selected' : ''}" data-action="select" data-id="${esc(e.id)}">${esc(e.text || elementLabels[e.type] || e.type)}</button>`).join('') || '<p class="hint">添加第一个元素<br>开始创作</p>'}</div></section>` +
     `<section class="stage-wrap"><div class="stage" id="stage" style="aspect-ratio:${state.settings.width}/${state.settings.height}"><img id="canvas-preview" alt="画布预览" style="aspect-ratio:${state.settings.width}/${state.settings.height}"><div class="selection" id="selection" hidden></div></div><span class="stage-caption" id="preview-status">正在生成预览…</span><div class="page-controls"><button class="small" data-action="prev-page">← 上一页</button><span id="page-label">预览页 ${editorPage+1}</span><button class="small" data-action="next-page">下一页 →</button></div></section><section class="panel editor-panel properties"><h3>${el ? '元素属性' : '画布属性'}</h3>${el ? properties(el) : `<div class="field"><label>背景颜色</label><input type="color" id="bg-color" value="${draft.background}"></div><p class="hint">预览尺寸由全局设置决定。<br>模板会按比例适配设备画布。</p>`}</section></div>` +
     '<p class="editor-footer">动态文字：{{date}} 日期 · {{time}} 时间 · {{weekday}} 星期 · {{lunarDate}} 农历 · {{city}} 城市 · {{temperature}} 温度 · {{memo}} 备忘录<br>天气城市与信息源在「设置」中配置。列表组件自动分页，网页翻页不会改变设备页码。</p>';
   $('#theme-name').addEventListener('input', e => { draft.name = e.target.value; markDirty(); });
+  $('#theme-description').addEventListener('input', e => { draft.description = e.target.value; markDirty(); });
   $('#bg-color')?.addEventListener('input', e => { draft.background = e.target.value; markDirty(); queuePreview(); });
   document.querySelectorAll('[data-prop]').forEach(input => input.addEventListener('input', e => {
     if (e.target.type === 'number' && (e.target.value === '' || !e.target.checkValidity())) return;
@@ -61,7 +85,7 @@ function properties(el) {
   const text=el.type==='text'?`<div class="text-tools" role="toolbar" aria-label="文字格式"><label>字号<select data-prop="size" aria-label="字号">${[...new Set([8,9,10,11,12,14,16,18,20,22,24,26,28,32,36,40,48,56,64,72,96,120,el.size])].sort((a,b)=>a-b).map(size=>`<option value="${size}" ${size===el.size?'selected':''}>${size}</option>`).join('')}</select></label>${[['bold','B','加粗'],['italic','I','斜体'],['underline','U','下划线'],['strike','S','删除线']].map(([key,label,title])=>`<button type="button" data-text-toggle="${key}" class="format-${key}" aria-label="${title}" title="${title}" aria-pressed="${Boolean(el[key])}">${label}</button>`).join('')}<select data-prop="align" aria-label="文字对齐">${[['left','左对齐'],['center','居中'],['right','右对齐']].map(([v,l])=>`<option value="${v}" ${(el.align||'left')===v?'selected':''}>${l}</option>`).join('')}</select></div><label class="text-editor-label" for="text-input">文字内容 <small>与画布同尺寸、同字号</small></label><div class="text-viewport"><div id="text-editor"><canvas aria-label="文字排版编辑区"></canvas><textarea id="text-input" aria-label="文字内容" maxlength="5000" spellcheck="false"></textarea></div></div><p class="hint" id="text-layout-hint"></p><button class="small" id="fit-text-height">适应文字高度</button><div class="checkline"><input type="checkbox" data-prop="fit" id="fit" ${el.fit?'checked':''}><label for="fit">单行文字过长时缩小字号</label></div>${field('lineHeight','行高')}`:'';
   return text+`${el.type==='image'?'<div class="image-actions"><button data-action="recrop-image">重新裁剪</button><button data-action="replace-image">更换图片</button></div>':''}${el.type==='weather-icon'?'<p class="hint">天气图标随设置中的城市天气更新。</p>':''}${el.type==='feed'?`<div class="field"><label>列表数据</label><select data-prop="source"><option value="trending" ${el.source==='trending'?'selected':''}>微博热搜</option><option value="news" ${el.source==='news'?'selected':''}>新闻头条</option></select><small>数据源在设置中选择，自动分页。</small></div><div class="row">${field('size','字号')}${field('lineHeight','行高')}</div><div class="checkline"><input type="checkbox" data-prop="bold" ${el.bold?'checked':''} id="bold"><label for="bold">加粗</label></div>`:''}<div class="row">${field('x','X 坐标')}${field('y','Y 坐标')}</div><div class="row">${field('width','宽度')}${field('height','高度')}</div>${field('color','颜色','color')}<div class="row"><button class="small" data-action="backward">下移一层</button><button class="small" data-action="forward">上移一层</button></div><button class="small" style="margin-top:12px;width:100%" data-action="remove">移除元素</button>`;
 }
-function markDirty() { dirty = true; if ($('#save-status')) $('#save-status').textContent = '有未保存更改'; }
+function markDirty() { dirty = view === 'editor' ? JSON.stringify(draft)!==draftBaseline : true; if ($('#save-status')) $('#save-status').textContent = dirty ? '有未保存更改' : '编辑你的画面'; }
 function updateSelection() {
   const el = draft.elements.find(e => e.id === selected), box = $('#selection'); if (!box) return;
   box.hidden = !el;
@@ -108,7 +132,7 @@ function bindDrag() {
 }
 async function saveTheme(activate) {
   const saved = await api(draft.id ? `/api/themes/${draft.id}` : '/api/themes', draft.id ? 'PUT' : 'POST', draft);
-  draft = saved; dirty = false;
+  draft = saved; draftBaseline=JSON.stringify(saved);dirty = false;
   if (activate) await api('/api/activate', 'POST', { themeId: saved.id });
   await refresh(); renderEditor(); toast(activate ? '已保存并设为默认，设备下次请求时生效' : '主题已保存');
 }
@@ -150,16 +174,34 @@ async function saveSettings() {
 }
 function showDetail(value) { $('#detail-body').textContent = JSON.stringify(value, null, 2); $('#detail').showModal(); }
 document.addEventListener('click', async event => {
+  const ownMenu=event.target.closest('.theme-menu');
+  document.querySelectorAll('.theme-menu[open]').forEach(menu=>{if(menu!==ownMenu)menu.open=false;});
   const nav = event.target.closest('[data-view]'); if (nav) return navigate(nav.dataset.view);
   const button = event.target.closest('[data-action]'); if (!button) return;
   const { action, id } = button.dataset;
   try {
     if (['blank','copy','edit'].includes(action)) {
-      if (dirty && !confirm('当前更改尚未保存，确定打开另一个主题？')) return;
+      if (dirty && !await confirmAction('有未保存的更改','打开另一个主题后，当前尚未保存的更改将被放弃。','放弃更改并打开')) return;
       const t = state.themes.find(t => t.id === id);
       draft = action === 'blank' ? blank() : structuredClone(t);
-      if (action === 'copy') { delete draft.id; draft.builtin = false; draft.name += ' · 副本'; }
-      selected = null; dirty = false; editorPage=0;editorPageCount=1;navigate('editor'); return;
+      if (action === 'copy') { delete draft.id; draft.builtin = false; draft.name = copyName(draft.name); }
+      draftBaseline=action==='copy'?null:JSON.stringify(draft);
+      selected = null; dirty = false; editorPage=0;editorPageCount=1;await navigate('editor');markDirty(); return;
+    }
+    if (action === 'back-themes') { await navigate('themes'); return; }
+    if (action === 'copy-custom') {
+      const original=state.customThemes.find(t=>t.id===id);if(!original)throw Error('主题不存在，请刷新页面');
+      button.disabled=true;
+      const copy=structuredClone(original);delete copy.id;copy.name=copyName(copy.name);
+      await api('/api/themes','POST',copy);await refresh();renderThemes();toast('已复制主题，可在我的主题中编辑副本');return;
+    }
+    if (action === 'delete-theme') {
+      const theme=state.customThemes.find(t=>t.id===id);if(!theme)throw Error('主题不存在，请刷新页面');
+      const effects=[state.activeTheme===id?'默认主题将切换为极简日历。':'',state.devices.some(d=>d.themeId===id)?'使用此主题的设备将改为跟随默认主题。':''].filter(Boolean).join('\n');
+      if (!await confirmAction('删除主题',`确定删除“${theme.name}”吗？删除后无法恢复。${effects?'\n'+effects:''}`,'确认删除','取消')) return;
+      button.disabled=true;
+      await api(`/api/themes/${encodeURIComponent(id)}`, 'DELETE');
+      await refresh(); renderThemes(); toast('主题已删除'); return;
     }
     if (action === 'connect') navigate('devices');
     if (action === 'activate') { await api('/api/activate','POST',{ themeId: id }); await refresh(); renderThemes(); toast('默认主题已更新，设备下次请求时获取'); }
@@ -213,6 +255,9 @@ document.addEventListener('click', async event => {
       const url = URL.createObjectURL(await r.blob()), a = document.createElement('a'); a.href = url; a.download = `${draft.name}.bmp`; a.click(); setTimeout(() => URL.revokeObjectURL(url),1000);
     }
   } catch (e) { toast(e.message); } finally { button.disabled = false; }
+});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape')document.querySelectorAll('.theme-menu[open]').forEach(menu=>{menu.open=false;menu.querySelector('summary').focus();});
 });
 $('#image-file').addEventListener('change', async e => {
   const file = e.target.files[0]; e.target.value = ''; if (!file) return;

@@ -11,6 +11,10 @@
   <main><header><div id="breadcrumb">工作空间 <span>/</span> 主题画廊</div><div class="header-right"><span class="tag">LOCAL</span><span id="clock"></span></div></header><div id="content"></div></main>
   <div id="toast" role="status" aria-live="polite"></div>
   <dialog id="detail"><div class="dialog-head"><h3>请求详情</h3><button id="close-detail" class="icon-btn" aria-label="关闭">×</button></div><pre id="detail-body"></pre></dialog>
+  <dialog id="confirm-action" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+    <h3 id="confirm-title"></h3><p id="confirm-message"></p>
+    <div class="confirm-actions"><button id="confirm-cancel" autofocus>继续编辑</button><button id="confirm-accept" class="primary">确认</button></div>
+  </dialog>
   <input type="file" id="image-file" accept="image/png,image/jpeg,image/webp" hidden>
   <dialog id="image-crop" aria-labelledby="crop-title">
     <div class="dialog-head"><h3 id="crop-title">裁剪图片</h3><button id="crop-cancel" aria-label="取消裁剪">取消</button></div>
