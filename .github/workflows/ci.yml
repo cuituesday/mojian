@@ -30,13 +30,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-      # canvas 测试需要系统绘图库和中文字体。
+      # canvas 测试需要系统绘图库，中文字体使用项目自带文件。
       - name: 安装依赖并运行测试
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             python3 make g++ pkg-config libcairo2-dev libpango1.0-dev \
-            libjpeg-dev libgif-dev librsvg2-dev fonts-noto-cjk fontconfig
+            libjpeg-dev libgif-dev librsvg2-dev fontconfig
           npm ci
           npm test
 
