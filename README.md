@@ -197,4 +197,4 @@ curl -D - -o /tmp/ink-device.bmp \
 
 运行 `npm test` 可验证 BMP、渲染、设备协议、静默、持久化与输入边界。测试使用独立临时数据目录，不混入真实设备数据。
 
-文字编辑与服务端渲染共用随项目附带的 Noto Sans SC 常规和粗体字体，来自 [Noto CJK](https://github.com/notofonts/noto-cjk)，按 SIL Open Font License 1.1 提供，许可证见 `public/fonts/LICENSE`。
+文字编辑、日历、农历和动态列表等服务端渲染统一使用随项目附带的 Noto Sans SC 常规和粗体字体，来自 [Noto CJK](https://github.com/notofonts/noto-cjk)，按 SIL Open Font License 1.1 提供，许可证见 `public/fonts/LICENSE`。Docker 使用基于 Debian 12（Bookworm）的 `node:24-bookworm-slim`，不再额外安装整套 `fonts-noto-cjk`，避免重复携带中日韩字体；保留字体加载和图像处理所需的运行库。编译工具仅在构建阶段使用。
