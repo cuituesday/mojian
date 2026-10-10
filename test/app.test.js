@@ -73,6 +73,8 @@ test('API persists configuration, isolates previews, records device protocol, fr
   response = await call('/api/themes/calendar','PUT',themes[0]); assert.equal(response.status,400);
   response = await call('/api/themes','POST',{ ...themes[0], name:'测试副本' }); assert.equal(response.status,201);
   const copy = await response.json(); assert.equal(copy.builtin,false);
+  response = await call(`/api/themes/${copy.id}`,'PUT',{ ...copy, description:'可修改的主题描述' }); assert.equal(response.status,200);
+  assert.equal((await (await call('/api/state')).json()).customThemes[0].description,'可修改的主题描述');
   response = await call('/api/themes','POST',{ ...themes[0], elements:[{ id:'a', type:'image',x:0,y:0,width:400,height:300,color:'#ffffff',src:'http://localhost/private' }] }); assert.equal(response.status,400);
   response = await call('/api/settings','PUT',{interval:'1010'}); assert.equal(response.status,400);
   response = await call('/api/settings','PUT',{quietEnabled:'false'}); assert.equal(response.status,400);
@@ -97,5 +99,29 @@ test('API persists configuration, isolates previews, records device protocol, fr
   const persisted = JSON.parse(fs.readFileSync(path.join(dataDir,'state.json'))); assert.equal(persisted.activeTheme,'clock'); assert.equal(persisted.settings.interval,'1'); assert.equal(persisted.customThemes[0].name,'测试副本');
   const restart = createApp({dataDir}).listen(0,'127.0.0.1'); await once(restart,'listening');
   try { const restored = await (await fetch(`http://127.0.0.1:${restart.address().port}/api/state`)).json(); assert.equal(restored.devices[0].count,2); assert.equal(restored.activeTheme,'clock'); } finally { await new Promise(resolve => restart.close(resolve)); }
+  response = await call(`/api/themes/${copy.id}`,'DELETE'); assert.equal(response.status,200);
+  assert.equal((await (await call('/api/state')).json()).customThemes.length,0);
+  response = await call('/api/themes/calendar','DELETE'); assert.equal(response.status,400);
   await call('/wrong-device-path?token=PRIVATE','GET',null,hdr); snapshot = await getState(); assert.equal(snapshot.requests[0].status,404); assert.ok(!snapshot.requests[0].url.includes('PRIVATE'));
+});
+
+test('删除自定义主题后修复默认主题和设备引用，并持久化保留其他主题', async t => {
+  const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'mojian-delete-'));
+  const original={...themes[0],id:'custom-original',builtin:false,name:'我的桌面日历',description:'原始描述'};
+  const copy={...structuredClone(original),id:'custom-copy',name:'我的桌面日历 · 副本'};
+  fs.writeFileSync(path.join(dataDir,'state.json'),JSON.stringify({settings:defaultSettings,customThemes:[original,copy],activeTheme:original.id,requests:[],devices:[{id:'device-a',themeId:original.id,contentPages:{[original.id]:2,[copy.id]:3}},{id:'device-b',themeId:copy.id}]}));
+  const server=createApp({dataDir}).listen(0,'127.0.0.1');await once(server,'listening');
+  t.after(async()=>{await new Promise(r=>server.close(r));fs.rmSync(dataDir,{recursive:true,force:true});});
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const response=await fetch(`${base}/api/themes/${original.id}`,{method:'DELETE'});assert.equal(response.status,200);
+  const saved=JSON.parse(fs.readFileSync(path.join(dataDir,'state.json')));
+  assert.equal(saved.activeTheme,themes[0].id);assert.deepEqual(saved.customThemes,[copy]);
+  assert.equal(saved.devices[0].themeId,null);assert.deepEqual(saved.devices[0].contentPages,{[copy.id]:3});
+  assert.equal(saved.devices[1].themeId,copy.id);
+  assert.equal((await fetch(`${base}/api/themes/calendar`,{method:'DELETE'})).status,400);
+  assert.equal((await fetch(`${base}/api/themes/missing`,{method:'DELETE'})).status,400);
+  const blocked=await fetch(`${base}/api/themes/${copy.id}`,{method:'DELETE',headers:{Origin:'https://unrelated.example'}});assert.equal(blocked.status,403);
+  const update=await fetch(`${base}/api/themes/${copy.id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({...copy,description:''})});assert.equal(update.status,200);
+  assert.equal((await update.json()).description,'');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dataDir,'state.json'))).customThemes[0].description,'');
 });

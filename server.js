@@ -68,7 +68,7 @@ function validateTheme(input) {
     }
     return result;
   });
-  return { name: input.name.trim(), description: String(input.description || '我的自定义画面').slice(0, 100), width: Math.round(input.width), height: Math.round(input.height), background: input.background, elements, builtin: false };
+  return { name: input.name.trim(), description: String(input.description ?? '我的自定义画面').slice(0, 100), width: Math.round(input.width), height: Math.round(input.height), background: input.background, elements, builtin: false };
 }
 function validateSettings(input, current) {
   const s = { ...current };
@@ -162,6 +162,17 @@ function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchI
   app.put('/api/themes/:id', (req, res) => {
     const index = state.customThemes.findIndex(t => t.id === req.params.id); if (index < 0) fail('内置主题只读，请先复制');
     state.customThemes[index] = { ...validateTheme(req.body), id: req.params.id }; save(); res.json(state.customThemes[index]);
+  });
+  app.delete('/api/themes/:id', (req, res) => {
+    const index = state.customThemes.findIndex(t => t.id === req.params.id);
+    if (index < 0) fail(themes.some(t=>t.id===req.params.id) ? '内置主题不能删除' : '主题不存在');
+    state.customThemes.splice(index, 1);
+    if (state.activeTheme === req.params.id) state.activeTheme = themes[0].id;
+    for (const device of state.devices) {
+      if (device.themeId === req.params.id) device.themeId = null;
+      if (device.contentPages) delete device.contentPages[req.params.id];
+    }
+    save(); res.json({ ok: true, activeTheme: state.activeTheme });
   });
   app.post('/api/activate', (req, res) => {
     if (!findTheme(req.body.themeId)) fail('主题不存在');
