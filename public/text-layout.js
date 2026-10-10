@@ -4,6 +4,7 @@
   else root.MojianText = factory();
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   const family = '"Mojian Text", sans-serif';
+  const isCheckbox = char => ['□','☐','☑'].includes(char);
   const formatKeys = ['bold','italic','underline','strike'];
   const baseStyle = el => Object.fromEntries(formatKeys.map(key => [key, Boolean(el[key])]));
   const sameStyle = (a,b) => formatKeys.every(key => a[key] === b[key]);
@@ -40,7 +41,19 @@
   function resolveVariables(el, vars) {
     const result={...el,styles:el.styles?.map(s=>({...s}))};
     const matches=[...el.text.matchAll(/\{\{(\w+)\}\}/g)];
-    for(const match of matches.reverse()) if(vars[match[1]]!==undefined) replaceText(result,match.index,match.index+match[0].length,String(vars[match[1]]));
+    for(const match of matches.reverse()) if(vars[match[1]]!==undefined) {
+      const value=String(vars[match[1]]).replace(/\r\n?/g,'\n');
+      replaceText(result,match.index,match.index+match[0].length,value);
+      // 完成状态随备忘录变量展开，仅给事项文字添加删除线，保留其他格式。
+      if(match[1]==='memo'){
+        const styles=stylesPerCharacter(result);
+        for(const line of value.matchAll(/^([ \t]*☑[ \t]*)([^\n]*)/gm)){
+          const start=match.index+line.index+line[1].length,end=start+line[2].length;
+          for(let i=start;i<end;i++)styles[i]={...styles[i],strike:true};
+        }
+        result.styles=packStyles(styles);
+      }
+    }
     return result;
   }
   function font(ctx, el, size = el.size) {
@@ -51,7 +64,7 @@
     value = String(value).replace(/\r\n?/g, '\n');
     let size = el.size;
     const styles=stylesPerCharacter({...el,text:value});
-    const measure=(char,index)=>{font(ctx,styles[index]||el,size);return ctx.measureText(char).width;};
+    const measure=(char,index)=>{font(ctx,styles[index]||el,size);return isCheckbox(char)?size*.9:ctx.measureText(char).width;};
     if (el.fit && !value.includes('\n')) {
       const width=()=>{let index=0,total=0;for(const char of value){total+=measure(char,index);index+=char.length;}return total;};
       while (size > 6 && width() > el.width) size--;
@@ -86,8 +99,19 @@
         const width=ctx.measureText(glyph.text).width,x=line.x+glyph.x;
         ctx.save();ctx.translate(x,line.y+result.size*.88);
         if(glyph.style.italic)ctx.transform(1,0,-.22,1,0,0);
-        if(width)ctx.scale(glyph.width/width,1);
-        ctx.fillText(glyph.text,0,0);ctx.restore();
+        if(isCheckbox(glyph.text)){
+          // 方框与勾选标志统一绘制，避免字体回退导致大小不一致。
+          const side=result.size*.7,top=-result.size*.74;
+          ctx.strokeStyle=el.color;ctx.lineWidth=Math.max(1,result.size/18);
+          ctx.strokeRect(1,top,side,side);
+          if(glyph.text==='☑'){
+            ctx.beginPath();ctx.moveTo(1+side*.18,top+side*.5);ctx.lineTo(1+side*.42,top+side*.75);ctx.lineTo(1+side*.84,top+side*.22);ctx.stroke();
+          }
+        }else{
+          if(width)ctx.scale(glyph.width/width,1);
+          ctx.fillText(glyph.text,0,0);
+        }
+        ctx.restore();
         ctx.strokeStyle = el.color; ctx.lineWidth = Math.max(1, result.size / 18);
         for (const y of [glyph.style.underline ? line.y + result.size * 1.02 : null, glyph.style.strike ? line.y + result.size * .56 : null]) {
           if (y !== null && glyph.width) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x+glyph.width, y); ctx.stroke(); }

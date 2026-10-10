@@ -62,16 +62,21 @@ npm run start:background
 | --- | --- |
 | 推送 `develop` | 安装依赖、运行 `npm test`，不构建或发布镜像 |
 | 向 `main` 提交 Pull Request | 运行测试，不发布镜像 |
-| 合并后推送 `main`（或直接推送 `main`） | 测试通过后，一次构建并上传 GHCR |
+| 合并后推送 `main`（或直接推送 `main`） | 测试通过后自动分配版本标签，一次构建并上传 GHCR |
+| Actions 中手动运行，选择 `main` | 可指定版本号；留空时使用相同的自动版本规则 |
 
 测试包含 BMP 渲染与设备接口验证；CI 不再额外启动容器执行冒烟检查。保留 Docker 构建层缓存以加快后续构建。
 
 镜像用于未来服务器部署，当前目标架构是常见 Linux x86_64 服务器的 `linux/amd64`：
 
 - `ghcr.io/cuituesday/mojian:latest`：最近一次成功发布的 main 镜像。
-- `ghcr.io/cuituesday/mojian:sha-<完整提交号>`：对应代码提交的镜像标签，供服务器固定版本或回滚使用。需要不可变引用时使用镜像 digest。
+- `ghcr.io/cuituesday/mojian:v0.1.1`：固定版本标签；后续依次为 `v0.1.2`、`v0.1.3`。需要不可变引用时使用镜像 digest。既有的 `sha-<完整提交号>` 镜像不删除，新构建改用版本号标签。
 
-工作流使用 GitHub 自动提供的 `GITHUB_TOKEN` 和 `packages: write` 权限，无需额外配置 Docker Hub 或 GitHub PAT。仓库需要启用 GitHub Actions，并允许工作流中的 GitHub/Docker Actions。构建状态在仓库的 Actions 页面查看；失败时不会执行后续发布步骤。此流程不部署服务器，也不更新本地正在运行的服务。
+版本号以仓库中的正式 Git 标签 `v主版本.次版本.补丁版本` 为准，与 `package.json` 的版本独立。没有版本标签时从 `v0.1.1` 开始，每个新提交在最高版本基础上将补丁号加一（例如 `v0.1.9` → `v0.1.10`）；同一提交重跑复用原版本号。测试通过后先创建并推送 Git 标签，再构建镜像；构建失败时标签仍保留，可在 Actions 重跑该任务，因此 Git 标签存在不代表镜像已经发布，失败版本也可能造成版本序列跳号。重跑旧提交不会将 `latest` 回退。
+
+如需指定版本，在 GitHub → Actions →「测试与发布镜像」→ Run workflow 中选择 `main`，填写如 `v0.2.0`；新指定版本必须高于当前最高版本，后续新提交自动从 `v0.2.1` 继续。留空则自动分配或复用该提交已有版本。主分支发布串行运行且不中断已运行任务；短时间连续推送时，GitHub 并发队列可能只保留最新待运行任务，不保证为被替换的中间提交发布镜像。
+
+工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`；仅发布任务获得 `contents: write`（创建 Git 标签）和 `packages: write`（上传镜像），无需额外配置 Docker Hub 或 GitHub PAT。仓库需要启用 GitHub Actions，并允许工作流中的 GitHub/Docker Actions；如设置了标签保护规则，还需允许此工作流创建版本标签。构建状态在仓库的 Actions 页面查看；失败时不会执行后续发布步骤。此流程不部署服务器，也不更新本地正在运行的服务。
 
 GHCR 首次创建的镜像包通常默认为私有。未来服务器匿名拉取前，可由仓库所有者到 GitHub 的 Packages → mojian → Package settings 设置为 Public；保持私有则使用有 `read:packages` 权限的凭据登录 GHCR 后拉取。若包已存在且提示无推送权限，检查包的 Manage Actions access 是否授权本仓库。本配置不自动修改包可见性。
 
@@ -89,7 +94,7 @@ git push origin develop
 # 功能完成后合并并发布；也可以在 GitHub 创建 develop → main 的 PR
 git switch main
 git pull --ff-only origin main
-git merge --no-ff develop -m "Merge develop into main"
+git merge --no-ff develop -m "合并开发分支到主分支"
 git push origin main
 
 # 回到开发分支，同步发布后的 main
@@ -111,7 +116,7 @@ docker compose ps
 docker compose logs -f --tail=100
 ```
 
-需要固定版本时把 `latest` 改成相应的 `sha-<完整提交号>`。更新时继续使用同一 Compose 项目名和数据卷。本地开发仍使用 Node.js 启动方式。Compose 服务名统一为 `mojian`，数据卷名保留 `ink-data` 以兼容现有数据；从旧版升级时先在原 Compose 文件目录执行 `docker compose down`（不带 `-v`），再替换文件并启动，避免旧容器继续占用端口。
+需要固定版本时把 `latest` 改成已发布的版本号，例如 `v0.1.1`（完整地址为 `ghcr.io/cuituesday/mojian:v0.1.1`）。更新时继续使用同一 Compose 项目名和数据卷。本地开发仍使用 Node.js 启动方式。Compose 服务名统一为 `mojian`，数据卷名保留 `ink-data` 以兼容现有数据；从旧版升级时先在原 Compose 文件目录执行 `docker compose down`（不带 `-v`），再替换文件并启动，避免旧容器继续占用端口。
 
 打开 `http://服务器IP:4000`；设备使用 `http://服务器IP:4000/generate-image`。容器内页面可能列出内部网卡地址，请使用宿主机局域网 IP 和已发布端口，不要填写容器内部 IP。本地 Node 服务已占用 4000 时，先停止它，或把 Compose 端口映射改为 `4001:4000` 并通过宿主机 4001 端口访问。
 
@@ -145,8 +150,9 @@ docker run -d --name mojian --init --restart unless-stopped \
 - 请求记录包含时间、来源 IP、路径、请求头和实际返回头；默认保留 30 天且最多 200 条，页面展示最近 100 条。常见认证字段会脱敏，但日志仍属于本地设备数据。
 - 24 位 BMP，正确包含四字节行对齐，支持宽高调整、黑白红量化、Floyd–Steinberg 与 Atkinson 抖动、180° 旋转。
 - 本地 JSON 保存主题、设备和设置；每设备 BMP 保存静默画面。数据位于 data/，可以整体备份。可用 INK_DATA_DIR 更改数据目录。
-- 设置中可搜索城市/区县，选择结果自动填写地区、经纬度、时区并勾选真实天气，保存后应用。可手动设置坐标。Open-Meteo 提供当前天气和 7 日预报，缓存 10 分钟；关闭时使用带标注的示例天气。
-- 热搜、新闻默认查询站点公开接口，也可选择手动输入。列表按画布宽高与字号分页；每台设备每个主题分别记住下一页，正常生成图片时翻页，静默保持期间不翻页。浏览器预览可以独立翻页，不改变设备页码。
+- 设置中可搜索城市/区县，中文地名优先使用本地坐标索引，精确匹配市级，其次区县；支持简称、行政区后缀及「河南省商丘市宁陵县」「北京市朝阳区」等完整名称。明确输入「朝阳区」时展示同名区供选择，不误选朝阳市。选择结果自动填写地区、经纬度、时区并勾选真实天气，保存后应用。可手动设置坐标。Open-Meteo 提供当前天气和 7 日预报，缓存 10 分钟；关闭时使用带标注的示例天气。
+- 自定义主题编辑器可直接添加「备忘录」元素，自动绑定 `{{memo}}`，支持拖动、缩放及调整字号、行高和颜色。设置中的「手动内容 · 备忘录」支持添加待办、为普通文字添加方框、勾选完成和取消完成，回车新增事项。完成事项整条文字显示删除线；点击「保存设置」后，所有使用 `{{memo}}` 的主题及设备画面同步使用该内容（设备在下次非静默刷新时更新）。旧的 `□` 事项会自动识别。
+- 热搜、新闻通过站点公开接口获取，设置页不再提供手动内容输入。列表按画布宽高与字号分页；每台设备每个主题分别记住下一页，正常生成图片时翻页，静默保持期间不翻页。浏览器预览可以独立翻页，不改变设备页码。
 
 ## 信息接口（2026-09-29 实测）
 
@@ -154,7 +160,7 @@ docker run -d --name mojian --init --restart unless-stopped \
 | --- | --- | --- |
 | 微博热搜 | `https://weibo.com/ajax/side/hotSearch` | 读取 `data.realtime[].word`，过滤广告；实测成功 |
 | 新闻头条 | `https://www.toutiao.com/hot-event/hot-board/?origin=toutiao_pc` | 读取 `data[].Title`；实测成功。这是今日头条热榜，并非原创每日新闻摘要 |
-| 城市检索 | `https://geocoding-api.open-meteo.com/v1/search` | `name` 查询中文或拼音地名；实测北京返回坐标 |
+| 城市检索 | 本地中文市区县索引；兜底 `https://geocoding-api.open-meteo.com/v1/search` | 本地命中无需联网；拼音、海外地名或未收录地点再查询在线接口 |
 | 天气预报 | `https://api.open-meteo.com/v1/forecast` | 当前温度/湿度/天气码、7 日高低温；实测成功 |
 
 微博、头条的字段与上游地址参考 [DailyHotApi](https://github.com/imsyy/DailyHotApi) 的 [微博适配器](https://github.com/imsyy/DailyHotApi/blob/master/src/routes/weibo.ts) 和 [头条适配器](https://github.com/imsyy/DailyHotApi/blob/master/src/routes/toutiao.ts)。实现自行编写，没有引入该项目依赖。其文档里的公共演示域名 `api-hot.imsyy.top` 本次无法解析，因此没有把演示服务设为依赖；有需要可另外自建 DailyHotApi。天气文档：[Open-Meteo](https://open-meteo.com/en/docs)、[Geocoding](https://open-meteo.com/en/docs/geocoding-api)。
