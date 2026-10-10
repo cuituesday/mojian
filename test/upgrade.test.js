@@ -52,7 +52,7 @@ test('source cache deduplicates, survives restart, marks stale responses and iso
   fail=false;const weatherSettings={...defaultSettings,weatherLive:true};
   const weather=await sources.weather(weatherSettings);assert.equal(weather.tomorrowCondition,'小雨');assert.equal(weather.temperature,22);
   const current=calls;await sources.weather({...weatherSettings,latitude:30});assert.equal(calls,current+1);
-  const cities=await sources.cities('杭州');assert.equal(cities[0].longitude,120.15);
+  const beforeCities=calls;const cities=await sources.cities('杭州');assert.equal(cities[0].name,'杭州');assert.equal(cities[0].source,'local');assert.equal(calls,beforeCities);
   assert.throws(()=>normalizeFeed('weibo',{data:{}}));
 });
 test('live-device responses send settings, paginate per device, and previews never advance device pages',async t=>{

@@ -1,4 +1,4 @@
-name: Test and publish image
+name: 测试与发布镜像
 
 # develop 和面向 main 的 PR 只测试；main 推送后额外发布镜像。
 on:
@@ -6,14 +6,20 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "指定版本（例如 v0.2.0），留空自动递增；请选择 main 分支"
+        required: false
+        type: string
 
 permissions:
   contents: read
 
-# 同一分支有新提交时取消旧任务，避免浪费构建资源。
+# main 发布串行运行，不中断已经开始的版本发布；其他分支取消旧任务。
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   test:
@@ -25,7 +31,7 @@ jobs:
         with:
           node-version: "24"
       # canvas 测试需要系统绘图库和中文字体。
-      - name: Install dependencies and run tests
+      - name: 安装依赖并运行测试
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -36,18 +42,24 @@ jobs:
 
   publish:
     needs: test
-    # 测试成功且事件是 main 推送时才发布；PR 不获得发布权限。
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # 仅 main 推送或 main 手动运行可发布；PR 不获得发布权限。
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
-      contents: read
+      # 创建版本标签需要源码写权限，仅发布任务获得此权限。
+      contents: write
       packages: write
     env:
       # 不上传额外的构建记录文件，减少 Actions 存储占用。
       DOCKER_BUILD_RECORD_UPLOAD: "false"
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
       - uses: docker/setup-buildx-action@v4
       # 使用 GitHub 自动提供的令牌，无需配置个人 Token。
       - uses: docker/login-action@v4
@@ -55,19 +67,42 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # 一次构建直接发布；latest 用于更新，提交号标签用于固定版本。
+      # 先预留 Git 标签，失败后重跑复用该版本，其他提交不会占用同一版本号。
+      - name: 分配发布版本
+        id: release
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          git fetch origin --tags
+          VERSION="$(node scripts/release-version.js)"
+          if ! git show-ref --verify --quiet "refs/tags/$VERSION"; then
+            git tag "$VERSION" "$GITHUB_SHA"
+          fi
+          git push origin "refs/tags/$VERSION"
+          MAIN_SHA="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          {
+            echo 'tags<<EOF'
+            echo "ghcr.io/cuituesday/mojian:$VERSION"
+            # 重跑旧提交只发布原版本，避免将 latest 回退到旧代码。
+            if [ "$MAIN_SHA" = "$GITHUB_SHA" ]; then
+              echo 'ghcr.io/cuituesday/mojian:latest'
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+      # 一次构建发布版本号标签和 latest，版本号用于固定部署或回滚。
       - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
           push: true
-          tags: |
-            ghcr.io/cuituesday/mojian:latest
-            ghcr.io/cuituesday/mojian:sha-${{ github.sha }}
+          tags: ${{ steps.release.outputs.tags }}
           # 将镜像关联到源码仓库，便于追溯版本。
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
           # 复用 Docker 构建层，减少后续重复安装依赖的时间。
           cache-from: type=gha,scope=mojian-amd64
           cache-to: type=gha,scope=mojian-amd64,mode=min
