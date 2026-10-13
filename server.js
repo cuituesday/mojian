@@ -106,6 +106,8 @@ function deviceHeaders(settings) {
 }
 function pageIndex(value) {const n=Number(value??0);if(!Number.isInteger(n)||n<0||n>999999)fail('页码无效');return n;}
 function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchImpl = fetch, config = loadConfig() } = {}) {
+  // 版本属于当前运行程序，不保存到业务数据中，升级后不会继承旧版本。
+  const version = process.env.APP_VERSION?.trim() || 'dev';
   fs.mkdirSync(dataDir, { recursive: true });
   fs.mkdirSync(path.join(dataDir, 'frames'), { recursive: true });
   const statePath = path.join(dataDir, 'state.json');
@@ -148,8 +150,8 @@ function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchI
     const addresses = Object.values(os.networkInterfaces()).flat().filter(x => x && x.family === 'IPv4' && !x.internal).map(x => `http://${x.address}:${port}/generate-image`);
     return { local: `http://localhost:${port}`, addresses };
   }
-  app.get('/api/health', (req, res) => res.json({ service: 'mojian', ok: true, pid: process.pid }));
-  app.get('/api/state', (req, res) => res.json({ ...state, requests: state.requests.slice(0, 100), themes: allThemes(), ...urls(), quietNow: isQuiet(state.settings), sourceStatus:sources.status() }));
+  app.get('/api/health', (req, res) => res.json({ service: 'mojian', ok: true, pid: process.pid, version }));
+  app.get('/api/state', (req, res) => res.json({ ...state, version, requests: state.requests.slice(0, 100), themes: allThemes(), ...urls(), quietNow: isQuiet(state.settings), sourceStatus:sources.status() }));
   app.get('/api/cities', async(req,res)=>{
     const q=String(req.query.q||'').trim();if(q.length<2||q.length>80)fail('请输入 2–80 字的城市名称');
     try{res.json({cities:await sources.cities(q)});}catch(e){res.status(502).json({error:`城市搜索失败：${e.message}。可手动填写经纬度。`});}

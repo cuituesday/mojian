@@ -22,6 +22,9 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json config.json server.js ./
 COPY lib ./lib
 COPY public ./public
+# 发布版本由 CI 注入，放在依赖安装之后以保留构建缓存。
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
 USER node
 EXPOSE 4000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \

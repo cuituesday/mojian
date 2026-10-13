@@ -135,7 +135,7 @@ test('text layout API matches render layout; crop and formats persist after serv
   t.after(async()=>{await new Promise(r=>server.close(r));fs.rmSync(dataDir,{recursive:true,force:true});});
   const base=`http://127.0.0.1:${server.address().port}`;
   const post=(url,body)=>fetch(base+url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  assert.equal((await(await fetch(base+'/api/health')).json()).service,'mojian');
+  const health=await(await fetch(base+'/api/health')).json();assert.equal(health.service,'mojian');assert.equal(health.version,'dev');
   const element={...text,text:'共享排版\nabc',underline:true,bold:true};
   Text.formatSelection(element,1,3,'italic');Text.formatSelection(element,5,8,'strike');
   const layout=await(await post('/api/text-layout',{element})).json();
@@ -146,7 +146,7 @@ test('text layout API matches render layout; crop and formats persist after serv
   const response=await post('/api/themes',theme([element,image]));assert.equal(response.status,201);
   const saved=await response.json();
   const restarted=createApp({dataDir}).listen(0,'127.0.0.1');await once(restarted,'listening');
-  try{const state=await(await fetch(`http://127.0.0.1:${restarted.address().port}/api/state`)).json();
+  try{const state=await(await fetch(`http://127.0.0.1:${restarted.address().port}/api/state`)).json();assert.equal(state.version,'dev');
     const restored=state.customThemes.find(t=>t.id===saved.id);
     assert.equal(restored.elements[0].underline,true);assert.deepEqual(restored.elements[0].styles,element.styles);assert.deepEqual(restored.elements[1].crop,image.crop);assert.equal(restored.elements[1].src,source);
   }finally{await new Promise(r=>restarted.close(r));}

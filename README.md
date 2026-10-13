@@ -113,6 +113,10 @@ git push origin develop
 
 ## Docker 部署（未来服务器使用）
 
+页面右上角显示当前运行版本，`/api/health` 和 `/api/state` 同时返回 `version`。CI 将本次 Git 标签（如 `v0.1.4`）通过构建参数 `APP_VERSION` 写入镜像，使用 `latest` 部署也会显示具体版本。无需在 Compose 中手动配置版本号。此功能仅对包含该改动的新镜像生效，旧镜像不会自动获得版本显示。
+
+本地 `npm start` 或未指定版本的手动镜像构建显示「开发版」（接口值为 `dev`）。手动构建可使用 `docker build --build-arg APP_VERSION=v0.1.4 -t mojian:v0.1.4 .`；仅设置镜像标签 `-t` 不会自动注入程序版本。版本信息不保存在 `data/` 中，也不替代设备协议中的固件版本 `fver`。
+
 将本仓库的 `compose.yaml` 和 `config.json` 放到服务器同一个部署目录中。Compose 已使用 `ghcr.io/cuituesday/mojian:latest`，直接拉取已发布镜像，不在服务器编译源码。镜像使用 Node.js 24，包含 canvas 运行库和中文字体，以非 root 用户运行。在部署目录执行：
 
 ```sh

@@ -98,6 +98,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.release.outputs.tags }}
+          # 页面版本与本次分配的 Git 标签、镜像版本使用同一个值。
+          build-args: |
+            APP_VERSION=${{ steps.release.outputs.version }}
           # 将镜像关联到源码仓库，便于追溯版本。
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
