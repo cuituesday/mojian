@@ -76,7 +76,7 @@ test('API persists configuration, isolates previews, records device protocol, fr
   response = await call(`/api/themes/${copy.id}`,'PUT',{ ...copy, description:'可修改的主题描述' }); assert.equal(response.status,200);
   assert.equal((await (await call('/api/state')).json()).customThemes[0].description,'可修改的主题描述');
   response = await call('/api/themes','POST',{ ...themes[0], elements:[{ id:'a', type:'image',x:0,y:0,width:400,height:300,color:'#ffffff',src:'http://localhost/private' }] }); assert.equal(response.status,400);
-  response = await call('/api/settings','PUT',{interval:'1010'}); assert.equal(response.status,400);
+  response = await call('/api/settings','PUT',{interval:'1061'}); assert.equal(response.status,400);
   response = await call('/api/settings','PUT',{quietEnabled:'false'}); assert.equal(response.status,400);
   response = await call('/api/settings','PUT',{quietEnabled:true,quietStart:5,quietEnd:5}); assert.equal(response.status,400);
   response = await call('/api/settings','PUT',{interval:'0'}, {Origin:'https://unrelated.example'}); assert.equal(response.status,403);

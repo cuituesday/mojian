@@ -5,7 +5,7 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const net = require('node:net');
 const { themes, defaultSettings } = require('./lib/themes');
-const { render, isQuiet } = require('./lib/render');
+const { render, isQuiet, refreshInterval } = require('./lib/render');
 const { createDataSources } = require('./lib/data-sources');
 const { loadConfig, pruneRequests, cleanFiles } = require('./lib/maintenance');
 
@@ -27,9 +27,21 @@ function validateTheme(input) {
     const result = { id: el.id, type: el.type, x: el.x, y: el.y, width: el.width, height: el.height, color: el.color };
     if (el.type === 'text' || el.type === 'memo') {
       if(el.type==='memo') el={...el,text:'{{memo}}'};
+      if(el.memoSeparators!==undefined&&typeof el.memoSeparators!=='boolean')fail('待办分隔线必须为开关值');
+      result.memoSeparators=el.memoSeparators===true;
       if(el.memo!==undefined) {
         if(typeof el.memo!=='string'||el.memo.length>5000) fail('备忘录最多 5000 字');
         result.memo=el.memo;
+      }
+      if(el.memoItems!==undefined) {
+        if(!Array.isArray(el.memoItems)||el.memoItems.length>500)fail('备忘录事项最多 500 条');
+        result.memoItems=el.memoItems.map(item=>{
+          if(!item||typeof item.text!=='string'||typeof item.todo!=='boolean'||typeof item.done!=='boolean')fail('备忘录事项格式无效');
+          return {text:item.text.replace(/\r\n?/g,'\n'),todo:item.todo,done:item.todo&&item.done};
+        });
+        // 保留文本形式供旧变量使用，事项数组保存单条内容的换行和完成状态。
+        result.memo=require('./public/memo-editor').serialize(result.memoItems);
+        if(result.memo.length>5000)fail('备忘录最多 5000 字');
       }
       number(el.size, 6, 300, '字号');
       if (typeof el.text !== 'string' || el.text.length > 5000) fail('文字最多 5000 字');
@@ -78,7 +90,7 @@ function validateTheme(input) {
 function validateSettings(input, current) {
   const s = { ...current };
   for (const key of Object.keys(defaultSettings)) if (Object.hasOwn(input, key)) s[key] = input[key];
-  if (!['1005','0','1'].includes(s.interval)) fail('刷新间隔必须使用 Demo 已知编码');
+  if (typeof s.interval !== 'string' || s.interval.trim() !== s.interval || !/^(?:[0-9]|1[0-9]|2[0-3]|10(?:0[1-9]|[1-5][0-9]|60))$/.test(s.interval)) fail('刷新间隔编码应为 0–23（1–24 小时）或 1001–1060（1–60 分钟）');
   if (!['threshold','floyd','atkinson','original'].includes(s.mode)) fail('图像处理模式无效');
   if (![0,180].includes(s.rotation)) fail('仅支持 0° / 180°');
   for (const key of ['quietEnabled','sound','weatherLive','serverOverrideEnabled','feedRotate']) if (typeof s[key] !== 'boolean') fail(`${key} 必须为开关值`);
@@ -88,8 +100,8 @@ function validateSettings(input, current) {
   if(s.serverOverrideEnabled && !s.serverHost)fail('启用下发时请填写服务器地址');
   if(s.serverHost && !(net.isIP(s.serverHost)===4 || (!/^[\d.]+$/.test(s.serverHost) && s.serverHost.split('.').every(label=>/^[a-z\d](?:[a-z\d-]{0,61}[a-z\d])?$/i.test(label)))))fail('服务器地址只填写 IPv4 或域名，不包含协议、端口或路径');
   for (const key of ['width','height']) { number(s[key], 100, 1600, key); s[key] = Math.round(s[key]); }
-  for (const key of ['quietStart','quietEnd']) { number(s[key], 0, 23, key); if (!Number.isInteger(s[key])) fail('静默时段请填写整点'); }
-  if (s.quietEnabled && s.quietStart === s.quietEnd) fail('静默时段的开始与结束不能相同');
+  for (const key of ['quietStart','quietEnd']) { number(s[key], 0, 23, key); if (!Number.isInteger(s[key])) fail('停止刷新时段请填写整点'); }
+  if (s.quietEnabled && s.quietStart === s.quietEnd) fail('停止刷新时段的开始与结束不能相同');
   number(s.brightness, 1, 254, '亮度阈值'); number(s.redThreshold, 1, 255, '红色阈值');
   number(s.latitude, -90, 90, '纬度'); number(s.longitude, -180, 180, '经度');
   for (const key of ['city','cityLocation','timezone','serviceAddress','memo','trending','news','schedule','countdownName','countdownDate']) if (typeof s[key] !== 'string' || s[key].length > 5000) fail(`${key} 文本无效或过长`);
@@ -99,13 +111,13 @@ function validateSettings(input, current) {
   if (s.serviceAddress) { try { const u = new URL(s.serviceAddress); if (!['http:','https:'].includes(u.protocol) || u.username || u.password) throw Error(); } catch { fail('服务地址需为不包含密码的 http(s) URL'); } }
   return s;
 }
-function deviceHeaders(settings) {
-  const headers={wt:settings.interval,sound:settings.sound?'1':'0',fver:'1.0.0',fmd5:''};
+function deviceHeaders(settings, now = new Date()) {
+  const headers={wt:refreshInterval(settings,now),sound:settings.sound?'1':'0',fver:'1.0.0',fmd5:''};
   if(settings.serverOverrideEnabled)Object.assign(headers,{burl:settings.serverHost,bport:String(settings.serverPort)});
   return headers;
 }
 function pageIndex(value) {const n=Number(value??0);if(!Number.isInteger(n)||n<0||n>999999)fail('页码无效');return n;}
-function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchImpl = fetch, config = loadConfig() } = {}) {
+function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchImpl = fetch, config = loadConfig(), clock = () => new Date() } = {}) {
   // 版本属于当前运行程序，不保存到业务数据中，升级后不会继承旧版本。
   const version = process.env.APP_VERSION?.trim() || 'dev';
   fs.mkdirSync(dataDir, { recursive: true });
@@ -225,7 +237,8 @@ function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchI
   // Keep the vendor endpoint and the BMP / response-header contract.
   const inFlight = new Map();
   async function deviceResponse(req, res) {
-    const test = Boolean(req.query.istest), deviceId = String(req.headers['x-devid'] || '').slice(0, 128), now = new Date().toISOString();
+    const requestTime = clock(), requestSettings = { ...state.settings }, quietActive = isQuiet(requestSettings, requestTime);
+    const test = Boolean(req.query.istest), deviceId = String(req.headers['x-devid'] || '').slice(0, 128), now = requestTime.toISOString();
     let device = state.devices.find(d => d.id === deviceId);
     if (!test && deviceId) {
       if (!device && state.devices.length < 200) { device = { id: deviceId, name: `墨水屏 ${deviceId.slice(-6)}`, firstSeen: now, count: 0, themeId: null }; state.devices.push(device); }
@@ -235,22 +248,22 @@ function createApp({ dataDir = path.join(__dirname, 'data'), port = 4000, fetchI
     const framePath = deviceId ? path.join(dataDir, 'frames', `${crypto.createHash('sha256').update(deviceId).digest('hex')}.bmp`) : null;
     let bmp, held = false, feedPages;
     try {
-      if (!test && framePath && isQuiet(state.settings) && fs.existsSync(framePath)) {
+      if (!test && framePath && quietActive && fs.existsSync(framePath)) {
         bmp = fs.readFileSync(framePath); held = true;feedPages=device?.lastResponse?.feedPages;
         const usedAt = new Date(); fs.utimesSync(framePath, usedAt, usedAt);
       }
       else {
         const index=test?pageIndex(req.query.page):state.settings.feedRotate?(device?.contentPages?.[theme.id]||0):0;
         const battery=/^\d+(\.\d+)?$/.test(device?.battery||'')?`${Math.min(100,Number(device.battery))}%`:'--';
-        const frame=await makeFrame(theme,state.settings,{pageIndex:index,vars:{battery}});bmp=frame.bmp;feedPages=frame.feedPages;
+        const frame=await makeFrame(theme,requestSettings,{pageIndex:index,vars:{battery}});bmp=frame.bmp;feedPages=frame.feedPages;
         if (!test && framePath && device) { fs.writeFileSync(`${framePath}.tmp`, bmp); fs.renameSync(`${framePath}.tmp`, framePath); device.lastRenderedTheme = theme.id; }
         if(!test&&device&&Object.keys(feedPages).length){device.contentPages??={};device.contentPages[theme.id]=index+1;}
       }
       const headers = { 'Content-Type': 'image/bmp', 'Content-Length': String(bmp.length) };
-      if (!test) Object.assign(headers, { 'Content-Disposition': 'attachment; filename="time-info.bmp"', Connection: 'close', ...deviceHeaders(state.settings) });
+      if (!test) Object.assign(headers, { 'Content-Disposition': 'attachment; filename="time-info.bmp"', Connection: 'close', ...deviceHeaders(requestSettings,requestTime) });
       if (!test) {
-        if (device) { device.lastResponse = { at: now, held, themeId: held ? device.lastRenderedTheme : theme.id, bytes: bmp.length,feedPages }; }
-        record(req, { status: 200, held, themeId: held ? device?.lastRenderedTheme : theme.id, responseHeaders: headers,feedPages });
+        if (device) { device.lastResponse = { at: now, held, quietActive, wt: headers.wt, themeId: held ? device.lastRenderedTheme : theme.id, bytes: bmp.length,feedPages }; }
+        record(req, { status: 200, held, quietActive, themeId: held ? device?.lastRenderedTheme : theme.id, responseHeaders: headers,feedPages });
       }
       res.set(headers).status(200).end(bmp);
     } catch (e) { if (!test) record(req, { status: 500, error: e.message }); throw e; }

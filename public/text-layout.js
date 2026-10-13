@@ -39,18 +39,43 @@
     el.text=el.text.slice(0,start)+inserted+el.text.slice(end);el.styles=packStyles(styles);
   }
   function resolveVariables(el, vars) {
+    let completedRanges=null,memoRanges=null;
+    if(Array.isArray(el.memoItems)) {
+      // 结构化事项可区分事项内部换行和下一条事项，完成状态覆盖整条内容。
+      if(el.memoItems.some(item=>item.text.trim())) {
+        let offset=0;completedRanges=[];memoRanges=[];
+        const memo=el.memoItems.map(item=>{
+          const prefix=item.todo?(item.done?'☑ ':'□ '):'',text=item.text.replace(/\r\n?/g,'\n');
+          memoRanges.push({start:offset,contentStart:offset+prefix.length,end:offset+prefix.length+text.length,todo:item.todo});
+          if(item.todo&&item.done)completedRanges.push([offset+prefix.length,offset+prefix.length+text.length]);
+          offset+=prefix.length+text.length+1;
+          return prefix+text;
+        }).join('\n');
+        vars={...vars,memo};
+      }
+    }
     // 空白事项或仅有方框视为未填写，继续使用全局备忘录。
-    if(typeof el.memo==='string' && el.memo.split(/\r?\n/).some(line=>line.replace(/^[ \t]*[□☐☑]?[ \t]*/, '').trim())) vars={...vars,memo:el.memo};
-    const result={...el,styles:el.styles?.map(s=>({...s}))};
+    else if(typeof el.memo==='string' && el.memo.split(/\r?\n/).some(line=>line.replace(/^[ \t]*[□☐☑]?[ \t]*/, '').trim())) vars={...vars,memo:el.memo};
+    const result={...el,styles:el.styles?.map(s=>({...s})),memoRanges:[]};
     const matches=[...el.text.matchAll(/\{\{(\w+)\}\}/g)];
     for(const match of matches.reverse()) if(vars[match[1]]!==undefined) {
       const value=String(vars[match[1]]).replace(/\r\n?/g,'\n');
+      const delta=value.length-match[0].length;
+      for(const range of result.memoRanges)for(const key of ['start','contentStart','end'])range[key]+=delta;
       replaceText(result,match.index,match.index+match[0].length,value);
       // 完成状态随备忘录变量展开，仅给事项文字添加删除线，保留其他格式。
       if(match[1]==='memo'){
+        let offset=0;
+        const items=memoRanges||value.split('\n').map(line=>{
+          const prefix=line.match(/^[ \t]*[□☐☑][ \t]*/)?.[0]||'';
+          const item={start:offset,contentStart:offset+prefix.length,end:offset+line.length,todo:Boolean(prefix)};
+          offset+=line.length+1;return item;
+        });
+        result.memoRanges.unshift(...items.map((item,index)=>({...item,start:match.index+item.start,contentStart:match.index+item.contentStart,end:match.index+item.end,separator:item.todo&&index<items.length-1})));
         const styles=stylesPerCharacter(result);
-        for(const line of value.matchAll(/^([ \t]*☑[ \t]*)([^\n]*)/gm)){
-          const start=match.index+line.index+line[1].length,end=start+line[2].length;
+        const ranges=completedRanges||[...value.matchAll(/^([ \t]*☑[ \t]*)([^\n]*)/gm)].map(line=>[line.index+line[1].length,line.index+line[0].length]);
+        for(const [from,to] of ranges){
+          const start=match.index+from,end=match.index+to;
           for(let i=start;i<end;i++)styles[i]={...styles[i],strike:true};
         }
         result.styles=packStyles(styles);
@@ -73,6 +98,16 @@
     }
     const lineHeight = size * (el.lineHeight || 1.3), lines = [];
     let text = '', start = 0, offset = 0, glyphs=[], advance=0;
+    const ranges=el.memoRanges||[];
+    const itemAt=index=>ranges.find(item=>index>=item.start&&index<=item.end);
+    const indentAt=index=>{
+      const item=itemAt(index);
+      if(!item?.todo||index<=item.start)return 0;
+      let width=0,i=item.start;
+      for(const char of value.slice(item.start,item.contentStart)){width+=measure(char,i);i+=char.length;}
+      // 缩进使用坐标，不向内容插入空格，也不为缩进绘制删除线。
+      return Math.min(width,Math.max(0,el.width-size));
+    };
     const push = () => {
       const width = advance + (glyphs.at(-1)?.style.italic ? size*.2 : 0);
       const x = el.align === 'center' ? (el.width - width) / 2 : el.align === 'right' ? el.width - width : 0;
@@ -82,14 +117,30 @@
       text='';glyphs=[];advance=0;
     };
     for (const char of value) {
-      if (char === '\n') { push(); offset++; start = offset; continue; }
+      if (char === '\n') { push(); offset++; start = offset; advance=indentAt(start);continue; }
       const width=measure(char,offset),style=baseStyle(styles[offset]||el);
-      if (text && advance + width + (style.italic?size*.2:0) > el.width) { push(); start = offset; }
+      if (text && advance + width + (style.italic?size*.2:0) > el.width) { push(); start = offset;advance=indentAt(start); }
       glyphs.push({text:char,index:offset,x:advance,width,style});advance+=width;
       text += char; offset += char.length;
     }
     push();
-    return { lines, size, lineHeight, height: lines.length * lineHeight, value };
+    const separators=[];
+    for(const item of ranges){
+      const itemLines=lines.filter(line=>line.start>=item.start&&line.start<=item.end);
+      if(!itemLines.length)continue;
+      // 同一事项使用统一的对齐基准，让居中、右对齐时的续行也保留悬挂缩进。
+      if(item.todo){
+        const width=Math.max(...itemLines.map(line=>line.width));
+        const x=el.align==='center'?(el.width-width)/2:el.align==='right'?el.width-width:0;
+        for(const line of itemLines){const delta=x-line.x;line.x=x;for(const stop of line.stops)stop.x+=delta;}
+      }
+      if(item.separator&&el.memoSeparators===true){
+        const last=itemLines.at(-1);
+        // 横线画在已有行距内，不新增行或改变后续事项的位置。
+        separators.push({y:last.y+(size*1.08+lineHeight)/2});
+      }
+    }
+    return { lines, size, lineHeight, height: lines.length * lineHeight, value, separators };
   }
   function draw(ctx, el, value = el.text, measured = null) {
     const result = measured || layout(ctx, el, value);
@@ -119,6 +170,10 @@
           if (y !== null && glyph.width) { ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x+glyph.width, y); ctx.stroke(); }
         }
       }
+    }
+    ctx.strokeStyle=el.color;ctx.lineWidth=1;
+    for(const separator of result.separators||[]){
+      ctx.beginPath();ctx.moveTo(0,separator.y);ctx.lineTo(el.width,separator.y);ctx.stroke();
     }
     ctx.restore(); return result;
   }
