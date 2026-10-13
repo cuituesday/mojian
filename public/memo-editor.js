@@ -10,13 +10,13 @@
     });
   }
   function serialize(items){return items.map(item=>(item.todo?(item.done?'☑ ':'□ '):'')+item.text).join('\n');}
-  function mount(container,field,onChange){
-    let items=parse(field.value);
+  function mount(container,field,onChange,{multiline=false,items:initialItems}={}){
+    let items=initialItems?initialItems.map(item=>({...item})):parse(field.value);
     const list=document.createElement('div');list.className='memo-items';
     const toolbar=document.createElement('div');toolbar.className='memo-toolbar';
     container.replaceChildren(toolbar,list);
     function button(label,action){const b=document.createElement('button');b.type='button';b.className='small';b.textContent=label;b.addEventListener('click',action);return b;}
-    function sync(){field.value=serialize(items);onChange();}
+    function sync(){field.value=serialize(items);onChange(items.map(item=>({...item})));}
     function focus(index){list.children[index]?.querySelector('textarea')?.focus();}
     function add(todo){items.push({text:'',todo,done:false});sync();render();focus(items.length-1);}
     toolbar.append(button('＋ 添加待办',()=>add(true)),button('＋ 添加文字',()=>add(false)));
@@ -31,12 +31,13 @@
         const input=document.createElement('textarea');input.rows=1;input.value=item.text;input.placeholder='输入事项内容';input.setAttribute('aria-label',`第 ${index+1} 条备忘录`);
         const resize=()=>{input.style.height='auto';input.style.height=`${Math.max(40,input.scrollHeight)}px`;};
         input.addEventListener('input',()=>{
+          if(multiline){item.text=input.value.replace(/\r\n?/g,'\n');sync();resize();return;}
           const lines=input.value.replace(/\r\n?/g,'\n').split('\n');
           if(lines.length>1){items.splice(index,1,...lines.map(text=>({...item,text})));sync();render();focus(index+lines.length-1);}
           else {item.text=input.value;sync();resize();}
         });
         input.addEventListener('keydown',event=>{
-          if(event.key!=='Enter'||event.isComposing)return;
+          if(multiline||event.key!=='Enter'||event.isComposing)return;
           event.preventDefault();const start=input.selectionStart,end=input.selectionEnd;
           const next={text:item.text.slice(end),todo:item.todo,done:false};item.text=item.text.slice(0,start);
           items.splice(index+1,0,next);sync();render();focus(index+1);
