@@ -19,7 +19,11 @@ async function api(url, method = 'GET', body) {
   if (!response.ok) { const e = await response.json().catch(() => ({})); throw Error(e.error || `请求失败 ${response.status}`); }
   return response.json();
 }
-async function refresh() { state = await api('/api/state'); $('#device-count').textContent = state.devices.length; }
+async function refresh() {
+  state = await api('/api/state'); $('#device-count').textContent = state.devices.length;
+  $('#app-version').textContent = state.version === 'dev' ? '开发版' : state.version || '版本未知';
+  $('#app-version').title = `当前运行版本：${state.version || '未提供版本信息'}`;
+}
 function head(title, subtitle, actions = '') { return `<div class="heading"><div><div class="eyebrow">YOUR PERSONAL INK SPACE</div><h1>${title}</h1><p class="subtext">${subtitle}</p></div>${actions}</div>`; }
 function confirmAction(title,message,accept='放弃更改并返回',cancel='继续编辑') {
   const dialog=$('#confirm-action');if(dialog.open)return Promise.resolve(false);
