@@ -19,13 +19,18 @@ function validateTheme(input) {
   if (!Array.isArray(input.elements) || input.elements.length > 80) fail('最多支持 80 个元素');
   const ids = new Set();
   const elements = input.elements.map(el => {
-    if (!el || !['text','rect','image','calendar','landscape','weather-icon','month-grid','feed'].includes(el.type)) fail('元素类型无效');
+    if (!el || !['text','memo','rect','image','calendar','landscape','weather-icon','month-grid','feed'].includes(el.type)) fail('元素类型无效');
     if (typeof el.id !== 'string' || ids.has(el.id)) fail('元素编号重复或缺失'); ids.add(el.id);
     for (const k of ['x','y']) number(el[k], -1600, 3200, k);
     for (const k of ['width','height']) number(el[k], 1, 3200, k);
     if (!color(el.color)) fail('元素颜色无效');
     const result = { id: el.id, type: el.type, x: el.x, y: el.y, width: el.width, height: el.height, color: el.color };
-    if (el.type === 'text') {
+    if (el.type === 'text' || el.type === 'memo') {
+      if(el.type==='memo') el={...el,text:'{{memo}}'};
+      if(el.memo!==undefined) {
+        if(typeof el.memo!=='string'||el.memo.length>5000) fail('备忘录最多 5000 字');
+        result.memo=el.memo;
+      }
       number(el.size, 6, 300, '字号');
       if (typeof el.text !== 'string' || el.text.length > 5000) fail('文字最多 5000 字');
       Object.assign(result, { text: el.text, size: el.size, bold: Boolean(el.bold), lineHeight: number(el.lineHeight || 1.3, 1, 3, '行高') });

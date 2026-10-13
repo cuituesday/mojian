@@ -39,6 +39,8 @@
     el.text=el.text.slice(0,start)+inserted+el.text.slice(end);el.styles=packStyles(styles);
   }
   function resolveVariables(el, vars) {
+    // 空白事项或仅有方框视为未填写，继续使用全局备忘录。
+    if(typeof el.memo==='string' && el.memo.split(/\r?\n/).some(line=>line.replace(/^[ \t]*[□☐☑]?[ \t]*/, '').trim())) vars={...vars,memo:el.memo};
     const result={...el,styles:el.styles?.map(s=>({...s}))};
     const matches=[...el.text.matchAll(/\{\{(\w+)\}\}/g)];
     for(const match of matches.reverse()) if(vars[match[1]]!==undefined) {

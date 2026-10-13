@@ -4,13 +4,38 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const { once } = require('node:events');
 const { createCanvas } = require('canvas');
 const { createApp, validateTheme } = require('../server');
-const { render } = require('../lib/render');
+const { render, dateParts } = require('../lib/render');
 const { defaultSettings } = require('../lib/themes');
 const Text = require('../public/text-layout');
 const Geometry = require('../public/geometry');
 const { condition } = require('../lib/data-sources');
 const text = {id:'t',type:'text',x:0,y:0,width:100,height:100,color:'#111111',size:24,lineHeight:1.3,text:'墨间 ABC',bold:false};
 const theme = elements => ({name:'编辑器测试',width:100,height:100,background:'#ffffff',elements});
+
+test('公历、农历、时间与农历月份按设置时区跨日更新并保留变量',async()=>{
+  const now=new Date('2026-02-16T16:01:00Z');
+  const shanghai=dateParts('Asia/Shanghai',now),utc=dateParts('UTC',now);
+  assert.equal(shanghai.date,'2026-02-17');assert.equal(shanghai.time,'00:01');
+  assert.equal(shanghai.lunarDate,'正月初一');assert.equal(shanghai.lunarMonth,'正月');
+  assert.equal(utc.date,'2026-02-16');assert.notEqual(shanghai.lunarDate,utc.lunarDate);
+  for(const key of ['date','lunarDate','time','lunarMonth']){
+    const el={...text,text:`{{${key}}}`};
+    const saved=validateTheme(theme([el]));assert.equal(saved.elements[0].text,el.text);
+    const settings={...defaultSettings,width:100,height:100,mode:'original'};
+    assert.deepEqual((await render(saved,settings,{},now)).bmp,(await render(theme([{...saved.elements[0],text:shanghai[key]}]),settings,{},now)).bmp);
+  }
+});
+
+test('备忘录元素保存独立事项，留空时使用全局备忘录', async()=>{
+  const memo={id:'m',type:'memo',x:0,y:0,width:100,height:100,color:'#111111',size:14,lineHeight:1.3,memo:''};
+  const saved=validateTheme(theme([memo]));
+  assert.equal(saved.elements[0].type,'memo');
+  assert.equal(saved.elements[0].text,'{{memo}}');
+  const settings={...defaultSettings,width:100,height:100,mode:'original',memo:'□ 全局事项'};
+  const empty=(await render(saved,settings)).bmp;
+  const own=validateTheme(theme([{...memo,memo:'□ 主题事项'}]));
+  assert.notDeepEqual(empty,(await render(own,settings)).bmp);
+});
 
 test('shared text layout preserves explicit lines, unicode, wrapping and fit alignment',()=>{
   const ctx=createCanvas(1,1).getContext('2d');
